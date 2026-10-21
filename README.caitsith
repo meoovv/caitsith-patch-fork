@@ -1,0 +1,482 @@
+Notes for CaitSith project
+
+CaitSith (which was derived from TOMOYO Linux 1.8.3) is an access restriction
+module for Linux systems. This module gives you ability to restrict access
+(e.g. opening files, executing programs) at the kernel level.
+
+This module is released under the GPLv2.
+
+Project URL: https://caitsith.sourceforge.net/
+
+ChangeLog:
+
+Version 0.1   2012/04/01   First release.
+
+  ccs-patch-\*.diff for TOMOYO 1.8.x is reusable to CaitSith by converting
+
+    sed -e 's/CCSECURITY/CAITSITH/g' -e 's/ccsecurity/caitsith/g'
+
+  before feeding to patch command.
+
+Fix 2012/05/04
+
+    @ Fix compiler warning.
+
+      Some compilers complained possible use of uninitialized variable
+      in ccs_read_policy(), though it actually should not happen.
+
+    @ Do not continue if policy version was not specified by policy file.
+
+      In order to stop if policy file was by error empty,
+      set default policy version to undefined.
+
+Version 0.1.1   2012/05/05   Bug fix release.
+
+Fix 2012/07/12
+
+    @ Fix wrong operation name when selectively reading via query id.
+
+      Operation name "execute" was by error always printed when
+      reading via query id.
+
+    @ Fix garbage collection check.
+
+      If an acl block was deleted without deleting decision lines in the acl
+      block, garbage collector was by error unable to reclaim memory.
+
+Version 0.1.2   2012/07/12   Bug fix release.
+
+Fix 2012/08/02
+
+    @ Fix identical conditions detection under 64 bits environment.
+
+      Detecting identical conditions was randomly failing because memory block
+      which holds conditions part by error had uninitialized 32 bits of hole
+      under 64 bits environment.
+
+Version 0.1.3   2012/08/02   Bug fix release.
+
+Fix 2012/08/17
+
+    @ Fix kfree() oops.
+
+      If CONFIG_CAITSITH_USE_EXTERNAL_TASK_SECURITY is not set, and no process
+      is using statically assigned ccs_kernel_domain object when
+      /proc/caitsith/ interface is close()d, the object was by error subjected
+      to kfree() by the garbage collector.
+
+Version 0.1.4   2012/08/17   Bug fix release.
+
+Fix 2012/08/31
+
+    @ Fix environment variable checking logic.
+
+      envp["ENVNAME"] was returning incorrect comparison results. However,
+      envp["ENVNAME"] still returns (you might think) incorrect comparison
+      results if multiple values with the same environment variable name
+      (e.g. HOME=/ and HOME=/root ) are passed in a way comparison results
+      differ. For further restriction, you might also want to use
+      "acl environ" in addition to "acl execute".
+
+Version 0.1.5   2012/08/31   Bug fix release.
+
+Fix 2012/10/08
+
+    @ Fix KABI breakage on Ubuntu 12.10.
+
+      I was using include/linux/security.h as the common path for pulling in
+      include/linux/caitsith.h so that I can avoid scattering #include line.
+
+      When scripts/genksyms/genksyms calculates hash values for Module.symvers
+      file, it uses the extracted form of involved structures if the structure
+      layout is known but it instead uses UNKNOWN if the structure layout is
+      not known. Therefore, pulling in include files that define structure's
+      layout from include/linux/caitsith.h causes changes in the hash values
+      and causes KABI breakage, even if no changes were made to the involved
+      structures.
+
+      Fix this breakage by avoiding pulling in include/linux/sched.h and
+      include/linux/dcache.h from include/linux/caitsith.h where possible.
+
+Fix 2012/11/01
+
+    @ Fix ccs_manager() oops.
+
+      If CONFIG_CAITSITH_USE_EXTERNAL_TASK_SECURITY is not set and
+      current->ccs_domain_info is not yet assigned, ccs_manager() triggered
+      oops when printing denial message.
+
+Version 0.1.6   2012/11/01   Bug fix release.
+
+    @ Allow more flexible conditions.
+
+      Updated policy parser in order to allow more flexible conditions.
+      As a side effect, information available in the audit logs may have
+      changed.
+
+Version 0.1.7   2012/12/25   Functionality enhancement release.
+
+    @ Fix policy parser regressions.
+
+      Parsing errors in "environ" and "pivot_root" are fixed.
+
+Version 0.1.8   2013/01/06   Bug fix release.
+
+    @ Support multiple concurrent LKM-based LSM modules.
+
+      Commit a2a8474c "exec: do not sleep in TASK_TRACED under
+      ->cred_guard_mutex" moved "current->in_execve = 1;" from before
+      prepare_bprm_creds() to after prepare_bprm_creds(). It turned out that,
+      as an unexpected bonus, we can use security_prepare_creds() as a hook for
+      emulating security_bprm_free() hook.
+
+      I updated the logic for security_bprm_free() emulation, and now LKM-based
+      LSM version of CaitSith should be able to coexist with other AKARI-like
+      LKM-based LSM implementations on all kernel versions other than 2.6.29
+      and 2.6.30.
+
+    @ Fix policy parser regressions.
+
+      Parsing errors in "handler" and "transition" are fixed.
+
+Version 0.1.9   2013/02/14   Functionality enhancement release.
+
+    @ Fix incompatible argument warning.
+
+      The hook for checking chown/chgrp permission was by error using
+      uid_t/gid_t instead of kuid_t/kgid_t, resulting in compiler warning with
+      3.5 and later kernels.
+
+    @ Change symbol prefix.
+
+      ccs_ prefix was changed to cs_ .
+      CCS_loader= and CCS_trigger= were changed to CS_loader= and CS_trigger= .
+
+      ccs-patch-\*.diff for TOMOYO 1.8.x is reusable to CaitSith by converting
+
+        sed -e 's/CCSECURITY/CAITSITH/g' -e 's/ccsecurity/caitsith/g' -e 's/ccs_domain_info/cs_domain_info/g' -e 's/ccs_flags/cs_flags/g'
+
+      before feeding to patch command.
+
+Version 0.1.10   2013/05/12   Bug fix release.
+
+Fix 2015/01/01
+
+    @ Fix missing chmod(-1) check in Linux 3.1 and later kernels.
+
+      Commit e57712ebebbb9db7 "merge fchmod() and fchmodat() guts, kill
+      ancient broken kludge" changed chmod(-1) from no-op to setting to
+      07777. Therefore, CaitSith must not ignore chmod(-1) case.
+
+    @ Fix potentially using bogus attributes when stat() fails.
+
+      We should reset attributes information when executing handler program,
+      or attributes of original program could be used when stat() on handler
+      program failed.
+
+Version 0.1.11   2015/01/12   Bug fix release.
+
+Fix 2015/04/08
+
+    @ Fix incorrect readdir() permission check.
+
+      CONFIG_CAITSITH_READDIR was meant for allowing users to control readdir()
+      permission check. However, CONFIG_CAITSITH_GETATTR was by error used for
+      controlling readdir() permission check. This fix should not affect
+      kernels built with default configuration, for both
+      CONFIG_CAITSITH_READDIR and CONFIG_CAITSITH_GETATTR are defined by
+      default.
+
+Version 0.1.12   2015/04/08   Bug fix release.
+
+Fix 2015/06/04
+
+    @ Fix incorrect open() argument.
+
+      The first argument for cs_open_permission() in LKM-based LSM version
+      for RHEL 6 branch was wrong since 0.1.11.
+
+Version 0.1.13   2015/06/06   Bug fix release.
+
+Fix 2015/07/19
+
+    @ Fix truncated quota reporting.
+
+      The audit[$index] quota lines were reported for only 0 <= $index <= 2
+      by error. Now, all 0 <= $index <= 255 will be reported.
+
+Version 0.1.14   2015/07/21   Bug fix release.
+
+Fix 2015/08/03
+
+    @ Limit wildcard recursion depth.
+
+      Since wildcards that need recursion consume kernel stack memory,
+      we cannot allow infinite recursion.
+
+Fix 2015/08/04
+
+    @ Fix incorrect /\(dir\)/ pattern match.
+
+      "/\(\*\)/\*" was failing to match "/" because "/\(\*\)/" did not match
+      "/" due to a bug in pattern matching function.
+
+Version 0.1.15   2015/08/06   Bug fix release.
+
+Fix 2016/06/07
+
+    @ Fix pathname calculation on overlayfs.
+
+      Since Linux 3.17, cs_realpath() was not calling cs_get_local_path()
+      when cs_get_absolute_path() returned -EINVAL. As a result, larger
+      memory allocation was needlessly attempted and access was finally
+      rejected due to out of memory error when used on overlayfs.
+
+Version 0.1.16   2016/06/07   Bug fix release.
+
+Fix 2016/09/25
+
+    @ Fix memory usage accounting for conditions.
+
+      cs_get_condition() forgot to resize conditional part before adding to
+      list. As a result, each conditional part consumed PAGE_SIZE bytes
+      rather than entry->size bytes, which can far exceed memory quota for
+      policy.
+
+Fix 2016/09/26
+
+    @ Use ksize() for more accurate memory usage accounting.
+
+      cs_round2() is not always accurate because available slab objects
+      might be version/config dependent.
+
+Version 0.1.17   2016/09/28   Bug fix release.
+
+Fix 2016/10/03
+
+    @ Use /sys/kernel/security/caitsith/ rather than /proc/caitsith/ .
+
+      In preparation for proposing CaitSith for mainline, I changed policy
+      interface.
+
+Version 0.2   2016/10/05   Policy interface update release.
+
+Fix 2017/02/02
+
+    @ Use for_each_thread() for GC operation.
+
+      while_each_thread() without tasklist_lock is not safe.
+      Use for_each_process_thread() if it is available, hold
+      tasklist_lock otherwise.
+
+Version 0.2.1   2017/02/20   Bug fix release.
+
+Fix 2017/08/18
+
+    @ Use smp_rmb() when waiting for hook readiness.
+
+      "while (!cond);" is implicitly optimized like "if (!cond) while (1);".
+      Use "while (!cond) smp_rmb();" in order to prevent such optimization.
+
+Version 0.2.2   2017/09/17   Bug fix release.
+
+Fix 2018/03/26
+
+    @ Fix wrong probe_kernel_write() usage.
+
+      Previously registered LSM hook (if any) was by error overwritten
+      by this hook. This bug affects only LKM-based LSM version of CaitSith
+      for 4.12 and later kernels.
+
+Version 0.2.3   2018/04/01   Bug fix release.
+
+Fix 2019/07/27
+
+    @ Change pathname calculation for read-only filesystems.
+
+      Commit 5625f2e3266319fd ("TOMOYO: Change pathname for non-rename()able
+      filesystems.") intended to be applied to filesystems where the content is
+      not controllable from the userspace (e.g. proc, sysfs, securityfs), based
+      on an assumption that such filesystems do not support rename() operation.
+
+      But it turned out that read-only filesystems also do not support rename()
+      operation despite the content is controllable from the userspace, and that
+      commit is annoying TOMOYO users who want to use e.g. squashfs as the root
+      filesystem due to use of local name which does not start with '/'.
+
+      Therefore, based on an assumption that filesystems which require the
+      device argument upon mount() request is an indication that the content
+      is controllable from the userspace, do not use local name if a filesystem
+      does not support rename() operation but requires the device argument upon
+      mount() request.
+
+    @ Reject move_mount() system call for now.
+
+      Commit 2db154b3ea8e14b0 ("vfs: syscall: Add move_mount(2) to move mounts
+      around") introduced security_move_mount() LSM hook, but we missed that
+      TOMOYO and AppArmor did not implement hooks for checking move_mount(2).
+      Since unchecked mount manipulation is not acceptable, for now pretend
+      as if move_mount(2) is unavailable.
+
+    @ Don't check open/getattr permission on sockets.
+
+      syzbot found that use of SOCKET_I()->sk from open() can result in
+      use after free problem, for socket's inode is still reachable via
+      /proc/pid/fd/n despite destruction of SOCKET_I()->sk already completed.
+
+      But there is no point with calling security_file_open() on sockets
+      because open("/proc/pid/fd/n", !O_PATH) on sockets fails with -ENXIO.
+
+      There is some point with calling security_inode_getattr() on sockets
+      because stat("/proc/pid/fd/n") and fstat(open("/proc/pid/fd/n", O_PATH))
+      are valid. But since information which can be protected by checking
+      security_inode_getattr() on sockets is trivial, let's not check it.
+
+Version 0.2.4   2019/08/20   Bug fix release.
+
+Fix 2019/12/07
+
+    @ Don't use nifty names on sockets.
+
+      Revert "Don't check open/getattr permission on sockets.", and then
+      get rid of special handling of sockets. As a side effect of this patch,
+      "socket:[family=\$:type=\$:protocol=\$]" in the policy files has to be
+      rewritten to "socket:[\$]".
+
+Version 0.2.5   2019/12/25   Bug fix release.
+
+Fix 2020/04/09
+
+    @ Fix wrong put_page() usage in cs_dump_page().
+
+      cs_dump_page() for 5.6+ was by error using wrong function to put page.
+
+Version 0.2.6   2020/04/13   Bug fix release.
+
+Fix 2020/08/19
+
+    @ Fix wrong cs_search_binary_handler() mapping.
+
+      When support for 5.8 kernel was added, cs_search_binary_handler() for
+      3.7- was by error mapped to wrong function.
+
+Version 0.2.7   2020/08/20   Bug fix release.
+
+Fix 2020/10/24
+
+    @ Fix /proc pathname calculation for Linux 5.8+ kernels.
+
+      ccs_realpath() for 5.8+ was by error not using proc_pid_ns() when
+      calculating /proc pathname.
+
+Version 0.2.8   2020/11/11   Bug fix release.
+
+Fix 2021/03/13
+
+    @ Fix cs_kernel_service().
+
+      Kernels from 5.5 to 5.11 are using PF_KTHREAD flag for the io_uring
+      worker threads.
+
+Fix 2021/03/15
+
+    @ Skip permission checks for fileless execution requests.
+
+      Kernels from 4.18 to 5.8 are using call_usermodehelper_setup_file() for
+      starting program without a valid pathname on a filesystem.
+      /sbin/modprobe from dockerd process could not load bpfilter.ko module
+      because cs_start_execve() cannot calculate pathname of program without
+      a valid pathname. Thus, allow call_usermodehelper_setup_file() to bypass
+      permission checks and suppress domain transitions.
+
+Version 0.2.9   2021/04/01   Bug fix release.
+
+Fix 2021/05/31
+
+    @ Use killable wait than interruptible wait.
+
+      It is inconsistent that waiting for a lock is interruptible while
+      memory allocation with that lock held is not interruptible.
+
+      Replace interruptible wait with killable wait, for it is not desirable
+      to terminate a process when that process was doing a domain transition
+      via "transition=" keyword.
+
+    @ Extend availability of "transition=" keyword to socket operations.
+
+      Policies for daemons can be split into a "setup" phase and a "runtime"
+      phase, distinguished by when they invoke `listen(2)` on their service
+      socket. It would be extremely useful to be able to trigger a domain
+      transition when that happens, so that the program can have its sandbox
+      tightened when its setup phase is over.
+
+Version 0.2.10   2021/06/06   Functionality enhancement release.
+
+Fix 2023/05/21
+
+    @ Fix incomplete execve() failure handling in LKM-based LSM version.
+
+      When cs_start_execve() failed before CS_TASK_IS_IN_EXECVE is set,
+      cs_clear_execve(-1, ptr) from cs_find_task_security() from
+      cs_cred_prepare() was not called. As a result, retried execve()
+      request did not check execute permission by calling
+      cs_start_execve() from cs_bprm_check_security(). Change
+      cs_start_execve() to clear "struct cs_security"->cs_request_info
+      before returning an error.
+
+      Also, commit 84029fd04c20 ("memcg: account security cred as well to
+      kmemcg") changed security_prepare_creds() to use GFP_KERNEL_ACCOUNT.
+      As a result, cs_clear_execve(-1, ptr) from cs_find_task_security()
+      from cs_cred_prepare() was not called. Since GFP_KERNEL_ACCOUNT is
+      defined as GFP_KERNEL | __GFP_ACCOUNT, change cs_cred_prepare() to
+      check whether gfp flag contains GFP_KERNEL.
+
+Version 0.2.11   2023/05/27   Security bug fix release.
+
+Fix 2024/03/31
+
+    @ Fix a UAF bug introduced by an oversight in TOMOYO revision 2930.
+
+      Backport commit 2f03fc340cac ("tomoyo: fix UAF write bug in
+      tomoyo_write_control()").
+
+Version 0.2.12   2024/04/01   Security bug fix release.
+
+Fix 2024/06/28
+
+    @ Unblock move_mount() system call.
+
+      Since util-linux 2.39 started using libmount-mountfd-support,
+      implementing appropriate permission check for move_mount() became
+      necessary for successfully booting a Linux system.
+
+Version 0.2.13   2024/07/15   Bug fix release.
+
+Fix 2024/11/11
+
+    @ Require CONFIG_KALLSYMS_ALL=y for building LKM-based LSM modules on 6.12+ kernels.
+
+      Since it became impossible to guess the address of static_calls_table
+      variable in Linux 6.12, I had to depend on CONFIG_KALLSYMS_ALL=y for
+      building LKM-based LSM modules with 6.12+ kernels. Also, I updated to
+      utilize CONFIG_KALLSYMS_ALL=y for building LKM-based LSM modules with
+      earlier kernels if CONFIG_KALLSYMS_ALL is defined.
+
+Version 0.2.14   2024/11/11   Bug fix release.
+
+Fix 2024/11/27
+
+    @ Fix probing of security_ops with CONFIG_KALLSYMS_ALL=y case.
+
+      There was a bug when loading LKM-based LSM modules on CentOS 7.
+
+Version 0.2.15   2024/11/28   Bug fix release.
+
+Fix 2026/09/28
+
+    @ Fix mkdir() mode value check.
+
+      Permission check for mkdir operation was by error using raw mode value
+      rather than value masked with S_IALLUGO.
+
+Version 0.2.16   2026/09/28   Bug fix release.

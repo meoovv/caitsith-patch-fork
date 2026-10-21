@@ -1,0 +1,10 @@
+Notes for this directory:
+
+  This directory contains LKM-based LSM version of CaitSith which was derived
+  from non-LSM version of CaitSith 0.1.11. This branch was developed for
+  inclusion into mainline, but is currently using hacks used by AKARI.
+
+Notes for Linux 2.6.29 and 2.6.30 kernels:
+
+  CaitSith in this directory and AKARI cannot work together due to lack of
+  security_bprm_free() LSM hook.

@@ -1,0 +1,1058 @@
+This is TOMOYO Linux patch for kernel 6.17.13.
+
+Source code for this patch is https://www.kernel.org/pub/linux/kernel/v6.x/linux-6.17.13.tar.xz
+---
+ fs/exec.c                 |    2 
+ fs/open.c                 |    2 
+ fs/proc/version.c         |    7 ++
+ include/linux/sched.h     |    5 +
+ include/linux/security.h  |   65 +++++++++++++----------
+ include/net/ip.h          |    4 +
+ init/init_task.c          |    4 +
+ kernel/kexec.c            |    4 +
+ kernel/module/main.c      |    5 +
+ kernel/ptrace.c           |   12 ++++
+ kernel/reboot.c           |    3 +
+ kernel/sched/syscalls.c   |    2 
+ kernel/signal.c           |   23 ++++++++
+ kernel/sys.c              |    8 ++
+ kernel/time/timekeeping.c |    8 ++
+ net/ipv4/raw.c            |    4 +
+ net/ipv4/udp.c            |    2 
+ net/ipv6/raw.c            |    4 +
+ net/ipv6/udp.c            |    2 
+ net/socket.c              |    4 +
+ net/unix/af_unix.c        |    5 +
+ security/Kconfig          |    2 
+ security/Makefile         |    3 +
+ security/security.c       |  127 +++++++++++++++++++++++++++++++++++-----------
+ 24 files changed, 247 insertions(+), 60 deletions(-)
+
+--- linux-6.17.13.orig/fs/exec.c
++++ linux-6.17.13/fs/exec.c
+@@ -1751,7 +1751,7 @@ static int bprm_execve(struct linux_binp
+ 	if (retval || bprm->is_check)
+ 		goto out;
+ 
+-	retval = exec_binprm(bprm);
++	retval = ccs_exec_binprm(bprm);
+ 	if (retval < 0)
+ 		goto out;
+ 
+--- linux-6.17.13.orig/fs/open.c
++++ linux-6.17.13/fs/open.c
+@@ -1607,6 +1607,8 @@ SYSCALL_DEFINE1(close, unsigned int, fd)
+  */
+ SYSCALL_DEFINE0(vhangup)
+ {
++	if (!ccs_capable(CCS_SYS_VHANGUP))
++		return -EPERM;
+ 	if (capable(CAP_SYS_TTY_CONFIG)) {
+ 		tty_vhangup_self();
+ 		return 0;
+--- linux-6.17.13.orig/fs/proc/version.c
++++ linux-6.17.13/fs/proc/version.c
+@@ -25,3 +25,10 @@ static int __init proc_version_init(void
+ 	return 0;
+ }
+ fs_initcall(proc_version_init);
++
++static int __init ccs_show_version(void)
++{
++	printk(KERN_INFO "Hook version: 6.17.13 2025/12/30\n");
++	return 0;
++}
++fs_initcall(ccs_show_version);
+--- linux-6.17.13.orig/include/linux/sched.h
++++ linux-6.17.13/include/linux/sched.h
+@@ -58,6 +58,7 @@ struct bpf_local_storage;
+ struct bpf_run_ctx;
+ struct bpf_net_context;
+ struct capture_control;
++struct ccs_domain_info;
+ struct cfs_rq;
+ struct fs_struct;
+ struct futex_pi_state;
+@@ -1504,6 +1505,10 @@ struct task_struct {
+ 	/* Pause tracing: */
+ 	atomic_t			tracing_graph_pause;
+ #endif
++#if defined(CONFIG_CCSECURITY) && !defined(CONFIG_CCSECURITY_USE_EXTERNAL_TASK_SECURITY)
++	struct ccs_domain_info		*ccs_domain_info;
++	u32				ccs_flags;
++#endif
+ 
+ #ifdef CONFIG_TRACING
+ 	/* Bitmask and counter of trace recursion: */
+--- linux-6.17.13.orig/include/linux/security.h
++++ linux-6.17.13/include/linux/security.h
+@@ -67,6 +67,7 @@ enum fs_value_type;
+ struct watch;
+ struct watch_notification;
+ struct lsm_ctx;
++#include <linux/ccsecurity.h>
+ 
+ /* Default (no) options for the capable function */
+ #define CAP_OPT_NONE 0x0
+@@ -713,7 +714,11 @@ static inline int security_syslog(int ty
+ static inline int security_settime64(const struct timespec64 *ts,
+ 				     const struct timezone *tz)
+ {
+-	return cap_settime(ts, tz);
++	int error = cap_settime(ts, tz);
++
++	if (!error)
++		error = ccs_settime(ts, tz);
++	return error;
+ }
+ 
+ static inline int security_vm_enough_memory_mm(struct mm_struct *mm, long pages)
+@@ -811,18 +816,18 @@ static inline int security_sb_mount(cons
+ 				    const char *type, unsigned long flags,
+ 				    void *data)
+ {
+-	return 0;
++	return ccs_sb_mount(dev_name, path, type, flags, data);
+ }
+ 
+ static inline int security_sb_umount(struct vfsmount *mnt, int flags)
+ {
+-	return 0;
++	return ccs_sb_umount(mnt, flags);
+ }
+ 
+ static inline int security_sb_pivotroot(const struct path *old_path,
+ 					const struct path *new_path)
+ {
+-	return 0;
++	return ccs_sb_pivotroot(old_path, new_path);
+ }
+ 
+ static inline int security_sb_set_mnt_opts(struct super_block *sb,
+@@ -844,7 +849,7 @@ static inline int security_sb_clone_mnt_
+ static inline int security_move_mount(const struct path *from_path,
+ 				      const struct path *to_path)
+ {
+-	return 0;
++	return ccs_move_mount_permission(from_path, to_path);
+ }
+ 
+ static inline int security_path_notify(const struct path *path, u64 mask,
+@@ -986,7 +991,7 @@ security_inode_post_setattr(struct mnt_i
+ 
+ static inline int security_inode_getattr(const struct path *path)
+ {
+-	return 0;
++	return ccs_inode_getattr(path);
+ }
+ 
+ static inline int security_inode_setxattr(struct mnt_idmap *idmap,
+@@ -1143,14 +1148,14 @@ static inline void security_file_free(st
+ static inline int security_file_ioctl(struct file *file, unsigned int cmd,
+ 				      unsigned long arg)
+ {
+-	return 0;
++	return ccs_file_ioctl(file, cmd, arg);
+ }
+ 
+ static inline int security_file_ioctl_compat(struct file *file,
+ 					     unsigned int cmd,
+ 					     unsigned long arg)
+ {
+-	return 0;
++	return ccs_file_ioctl(file, cmd, arg);
+ }
+ 
+ static inline int security_mmap_file(struct file *file, unsigned long prot,
+@@ -1179,7 +1184,7 @@ static inline int security_file_lock(str
+ static inline int security_file_fcntl(struct file *file, unsigned int cmd,
+ 				      unsigned long arg)
+ {
+-	return 0;
++	return ccs_file_fcntl(file, cmd, arg);
+ }
+ 
+ static inline void security_file_set_fowner(struct file *file)
+@@ -1201,7 +1206,7 @@ static inline int security_file_receive(
+ 
+ static inline int security_file_open(struct file *file)
+ {
+-	return 0;
++	return ccs_file_open(file);
+ }
+ 
+ static inline int security_file_post_open(struct file *file, int mask)
+@@ -1211,17 +1216,19 @@ static inline int security_file_post_ope
+ 
+ static inline int security_file_truncate(struct file *file)
+ {
+-	return 0;
++	return ccs_path_truncate(&file->f_path);
+ }
+ 
+ static inline int security_task_alloc(struct task_struct *task,
+ 				      unsigned long clone_flags)
+ {
+-	return 0;
++	return ccs_alloc_task_security(task);
+ }
+ 
+ static inline void security_task_free(struct task_struct *task)
+-{ }
++{
++	ccs_free_task_security(task);
++}
+ 
+ static inline int security_cred_alloc_blank(struct cred *cred, gfp_t gfp)
+ {
+@@ -1714,7 +1721,7 @@ static inline int security_unix_may_send
+ static inline int security_socket_create(int family, int type,
+ 					 int protocol, int kern)
+ {
+-	return 0;
++	return ccs_socket_create(family, type, protocol, kern);
+ }
+ 
+ static inline int security_socket_post_create(struct socket *sock,
+@@ -1735,19 +1742,19 @@ static inline int security_socket_bind(s
+ 				       struct sockaddr *address,
+ 				       int addrlen)
+ {
+-	return 0;
++	return ccs_socket_bind(sock, address, addrlen);
+ }
+ 
+ static inline int security_socket_connect(struct socket *sock,
+ 					  struct sockaddr *address,
+ 					  int addrlen)
+ {
+-	return 0;
++	return ccs_socket_connect(sock, address, addrlen);
+ }
+ 
+ static inline int security_socket_listen(struct socket *sock, int backlog)
+ {
+-	return 0;
++	return ccs_socket_listen(sock, backlog);
+ }
+ 
+ static inline int security_socket_accept(struct socket *sock,
+@@ -1759,7 +1766,7 @@ static inline int security_socket_accept
+ static inline int security_socket_sendmsg(struct socket *sock,
+ 					  struct msghdr *msg, int size)
+ {
+-	return 0;
++	return ccs_socket_sendmsg(sock, msg, size);
+ }
+ 
+ static inline int security_socket_recvmsg(struct socket *sock,
+@@ -2064,24 +2071,24 @@ int security_path_chroot(const struct pa
+ #else	/* CONFIG_SECURITY_PATH */
+ static inline int security_path_unlink(const struct path *dir, struct dentry *dentry)
+ {
+-	return 0;
++	return ccs_path_unlink(dir, dentry);
+ }
+ 
+ static inline int security_path_mkdir(const struct path *dir, struct dentry *dentry,
+ 				      umode_t mode)
+ {
+-	return 0;
++	return ccs_path_mkdir(dir, dentry, mode);
+ }
+ 
+ static inline int security_path_rmdir(const struct path *dir, struct dentry *dentry)
+ {
+-	return 0;
++	return ccs_path_rmdir(dir, dentry);
+ }
+ 
+ static inline int security_path_mknod(const struct path *dir, struct dentry *dentry,
+ 				      umode_t mode, unsigned int dev)
+ {
+-	return 0;
++	return ccs_path_mknod(dir, dentry, mode, dev);
+ }
+ 
+ static inline void security_path_post_mknod(struct mnt_idmap *idmap,
+@@ -2090,20 +2097,20 @@ static inline void security_path_post_mk
+ 
+ static inline int security_path_truncate(const struct path *path)
+ {
+-	return 0;
++	return ccs_path_truncate(path);
+ }
+ 
+ static inline int security_path_symlink(const struct path *dir, struct dentry *dentry,
+ 					const char *old_name)
+ {
+-	return 0;
++	return ccs_path_symlink(dir, dentry, old_name);
+ }
+ 
+ static inline int security_path_link(struct dentry *old_dentry,
+ 				     const struct path *new_dir,
+ 				     struct dentry *new_dentry)
+ {
+-	return 0;
++	return ccs_path_link(old_dentry, new_dir, new_dentry);
+ }
+ 
+ static inline int security_path_rename(const struct path *old_dir,
+@@ -2112,22 +2119,22 @@ static inline int security_path_rename(c
+ 				       struct dentry *new_dentry,
+ 				       unsigned int flags)
+ {
+-	return 0;
++	return ccs_path_rename(old_dir, old_dentry, new_dir, new_dentry, flags);
+ }
+ 
+ static inline int security_path_chmod(const struct path *path, umode_t mode)
+ {
+-	return 0;
++	return ccs_path_chmod(path, mode);
+ }
+ 
+ static inline int security_path_chown(const struct path *path, kuid_t uid, kgid_t gid)
+ {
+-	return 0;
++	return ccs_path_chown(path, uid, gid);
+ }
+ 
+ static inline int security_path_chroot(const struct path *path)
+ {
+-	return 0;
++	return ccs_path_chroot(path);
+ }
+ #endif	/* CONFIG_SECURITY_PATH */
+ 
+--- linux-6.17.13.orig/include/net/ip.h
++++ linux-6.17.13/include/net/ip.h
+@@ -385,6 +385,8 @@ bool inet_sk_get_local_port_range(const
+ #ifdef CONFIG_SYSCTL
+ static inline bool inet_is_local_reserved_port(const struct net *net, unsigned short port)
+ {
++	if (ccs_lport_reserved(port))
++		return true;
+ 	if (!net->ipv4.sysctl_local_reserved_ports)
+ 		return false;
+ 	return test_bit(port, net->ipv4.sysctl_local_reserved_ports);
+@@ -403,6 +405,8 @@ static inline bool inet_port_requires_bi
+ #else
+ static inline bool inet_is_local_reserved_port(struct net *net, unsigned short port)
+ {
++	if (ccs_lport_reserved(port))
++		return true;
+ 	return false;
+ }
+ 
+--- linux-6.17.13.orig/init/init_task.c
++++ linux-6.17.13/init/init_task.c
+@@ -220,6 +220,10 @@ struct task_struct init_task __aligned(L
+ #ifdef CONFIG_SECCOMP_FILTER
+ 	.seccomp	= { .filter_count = ATOMIC_INIT(0) },
+ #endif
++#if defined(CONFIG_CCSECURITY) && !defined(CONFIG_CCSECURITY_USE_EXTERNAL_TASK_SECURITY)
++	.ccs_domain_info = NULL,
++	.ccs_flags      = 0,
++#endif
+ };
+ EXPORT_SYMBOL(init_task);
+ 
+--- linux-6.17.13.orig/kernel/kexec.c
++++ linux-6.17.13/kernel/kexec.c
+@@ -16,7 +16,7 @@
+ #include <linux/syscalls.h>
+ #include <linux/vmalloc.h>
+ #include <linux/slab.h>
+-
++#include <linux/ccsecurity.h>
+ #include "kexec_internal.h"
+ 
+ static int kimage_alloc_init(struct kimage **rimage, unsigned long entry,
+@@ -209,6 +209,8 @@ static inline int kexec_load_check(unsig
+ 	/* We only trust the superuser with rebooting the system. */
+ 	if (!kexec_load_permitted(image_type))
+ 		return -EPERM;
++	if (!ccs_capable(CCS_SYS_KEXEC_LOAD))
++		return -EPERM;
+ 
+ 	/* Permit LSMs and IMA to fail the kexec */
+ 	result = security_kernel_load_data(LOADING_KEXEC_IMAGE, false);
+--- linux-6.17.13.orig/kernel/module/main.c
++++ linux-6.17.13/kernel/module/main.c
+@@ -64,6 +64,7 @@
+ 
+ #define CREATE_TRACE_POINTS
+ #include <trace/events/module.h>
++#include <linux/ccsecurity.h>
+ 
+ /*
+  * Mutex protects:
+@@ -783,6 +784,8 @@ SYSCALL_DEFINE2(delete_module, const cha
+ 
+ 	if (!capable(CAP_SYS_MODULE) || modules_disabled)
+ 		return -EPERM;
++	if (!ccs_capable(CCS_USE_KERNEL_MODULE))
++		return -EPERM;
+ 
+ 	len = strncpy_from_user(name, name_user, MODULE_NAME_LEN);
+ 	if (len == 0 || len == MODULE_NAME_LEN)
+@@ -3142,6 +3145,8 @@ static int may_init_module(void)
+ {
+ 	if (!capable(CAP_SYS_MODULE) || modules_disabled)
+ 		return -EPERM;
++	if (!ccs_capable(CCS_USE_KERNEL_MODULE))
++		return -EPERM;
+ 
+ 	return 0;
+ }
+--- linux-6.17.13.orig/kernel/ptrace.c
++++ linux-6.17.13/kernel/ptrace.c
+@@ -1389,6 +1389,12 @@ SYSCALL_DEFINE4(ptrace, long, request, l
+ {
+ 	struct task_struct *child;
+ 	long ret;
++	{
++		const int rc = ccs_ptrace_permission(request, pid);
++
++		if (rc)
++			return rc;
++	}
+ 
+ 	if (request == PTRACE_TRACEME) {
+ 		ret = ptrace_traceme();
+@@ -1528,6 +1534,12 @@ COMPAT_SYSCALL_DEFINE4(ptrace, compat_lo
+ {
+ 	struct task_struct *child;
+ 	long ret;
++	{
++		const int rc = ccs_ptrace_permission(request, pid);
++
++		if (rc)
++			return rc;
++	}
+ 
+ 	if (request == PTRACE_TRACEME) {
+ 		ret = ptrace_traceme();
+--- linux-6.17.13.orig/kernel/reboot.c
++++ linux-6.17.13/kernel/reboot.c
+@@ -18,6 +18,7 @@
+ #include <linux/syscalls.h>
+ #include <linux/syscore_ops.h>
+ #include <linux/uaccess.h>
++#include <linux/ccsecurity.h>
+ 
+ /*
+  * this indicates whether you can reboot with ctrl-alt-del: the default is yes
+@@ -743,6 +744,8 @@ SYSCALL_DEFINE4(reboot, int, magic1, int
+ 			magic2 != LINUX_REBOOT_MAGIC2B &&
+ 			magic2 != LINUX_REBOOT_MAGIC2C))
+ 		return -EINVAL;
++	if (!ccs_capable(CCS_SYS_REBOOT))
++		return -EPERM;
+ 
+ 	/*
+ 	 * If pid namespaces are enabled and the current task is in a child
+--- linux-6.17.13.orig/kernel/sched/syscalls.c
++++ linux-6.17.13/kernel/sched/syscalls.c
+@@ -153,6 +153,8 @@ int can_nice(const struct task_struct *p
+ SYSCALL_DEFINE1(nice, int, increment)
+ {
+ 	long nice, retval;
++	if (!ccs_capable(CCS_SYS_NICE))
++		return -EPERM;
+ 
+ 	/*
+ 	 * Setpriority might change our priority at the same moment.
+--- linux-6.17.13.orig/kernel/signal.c
++++ linux-6.17.13/kernel/signal.c
+@@ -3949,6 +3949,8 @@ static void prepare_kill_siginfo(int sig
+ SYSCALL_DEFINE2(kill, pid_t, pid, int, sig)
+ {
+ 	struct kernel_siginfo info;
++	if (ccs_kill_permission(pid, sig))
++		return -EPERM;
+ 
+ 	prepare_kill_siginfo(sig, &info, PIDTYPE_TGID);
+ 
+@@ -4012,6 +4014,19 @@ static int do_pidfd_send_signal(struct p
+ {
+ 	kernel_siginfo_t kinfo;
+ 
++	{
++		struct task_struct *task;
++		int id = 0;
++
++		rcu_read_lock();
++		task = pid_task(pid, PIDTYPE_PID);
++		if (task)
++			id = task_pid_vnr(task);
++		rcu_read_unlock();
++		if (task && ccs_kill_permission(id, sig))
++			return -EPERM;
++	}
++
+ 	switch (flags) {
+ 	case PIDFD_SIGNAL_THREAD:
+ 		type = PIDTYPE_PID;
+@@ -4169,6 +4184,8 @@ SYSCALL_DEFINE3(tgkill, pid_t, tgid, pid
+ 	/* This is only valid for single tasks */
+ 	if (pid <= 0 || tgid <= 0)
+ 		return -EINVAL;
++	if (ccs_tgkill_permission(tgid, pid, sig))
++		return -EPERM;
+ 
+ 	return do_tkill(tgid, pid, sig);
+ }
+@@ -4185,6 +4202,8 @@ SYSCALL_DEFINE2(tkill, pid_t, pid, int,
+ 	/* This is only valid for single tasks */
+ 	if (pid <= 0)
+ 		return -EINVAL;
++	if (ccs_tkill_permission(pid, sig))
++		return -EPERM;
+ 
+ 	return do_tkill(0, pid, sig);
+ }
+@@ -4197,6 +4216,8 @@ static int do_rt_sigqueueinfo(pid_t pid,
+ 	if ((info->si_code >= 0 || info->si_code == SI_TKILL) &&
+ 	    (task_pid_vnr(current) != pid))
+ 		return -EPERM;
++	if (ccs_sigqueue_permission(pid, sig))
++		return -EPERM;
+ 
+ 	/* POSIX.1b doesn't mention process groups.  */
+ 	return kill_proc_info(sig, info, pid);
+@@ -4244,6 +4265,8 @@ static int do_rt_tgsigqueueinfo(pid_t tg
+ 	if ((info->si_code >= 0 || info->si_code == SI_TKILL) &&
+ 	    (task_pid_vnr(current) != pid))
+ 		return -EPERM;
++	if (ccs_tgsigqueue_permission(tgid, pid, sig))
++		return -EPERM;
+ 
+ 	return do_send_specific(tgid, pid, sig, info);
+ }
+--- linux-6.17.13.orig/kernel/sys.c
++++ linux-6.17.13/kernel/sys.c
+@@ -267,6 +267,10 @@ SYSCALL_DEFINE3(setpriority, int, which,
+ 
+ 	if (which > PRIO_USER || which < PRIO_PROCESS)
+ 		goto out;
++	if (!ccs_capable(CCS_SYS_NICE)) {
++		error = -EPERM;
++		goto out;
++	}
+ 
+ 	/* normalize: avoid signed division (rounding problems) */
+ 	error = -ESRCH;
+@@ -1426,6 +1430,8 @@ SYSCALL_DEFINE2(sethostname, char __user
+ 
+ 	if (len < 0 || len > __NEW_UTS_LEN)
+ 		return -EINVAL;
++	if (!ccs_capable(CCS_SYS_SETHOSTNAME))
++		return -EPERM;
+ 	errno = -EFAULT;
+ 	if (!copy_from_user(tmp, name, len)) {
+ 		struct new_utsname *u;
+@@ -1479,6 +1485,8 @@ SYSCALL_DEFINE2(setdomainname, char __us
+ 		return -EPERM;
+ 	if (len < 0 || len > __NEW_UTS_LEN)
+ 		return -EINVAL;
++	if (!ccs_capable(CCS_SYS_SETHOSTNAME))
++		return -EPERM;
+ 
+ 	errno = -EFAULT;
+ 	if (!copy_from_user(tmp, name, len)) {
+--- linux-6.17.13.orig/kernel/time/timekeeping.c
++++ linux-6.17.13/kernel/time/timekeeping.c
+@@ -25,6 +25,7 @@
+ #include <linux/compiler.h>
+ #include <linux/audit.h>
+ #include <linux/random.h>
++#include <linux/ccsecurity.h>
+ 
+ #include <vdso/auxclock.h>
+ 
+@@ -2587,10 +2588,15 @@ static int timekeeping_validate_timex(co
+ 		if (!(txc->modes & ADJ_OFFSET_READONLY) &&
+ 		    !capable(CAP_SYS_TIME))
+ 			return -EPERM;
++		if (!(txc->modes & ADJ_OFFSET_READONLY) &&
++		    !ccs_capable(CCS_SYS_SETTIME))
++			return -EPERM;
+ 	} else {
+ 		/* In order to modify anything, you gotta be super-user! */
+ 		if (txc->modes && !capable(CAP_SYS_TIME))
+ 			return -EPERM;
++		if (txc->modes && !ccs_capable(CCS_SYS_SETTIME))
++			return -EPERM;
+ 		/*
+ 		 * if the quartz is off by more than 10% then
+ 		 * something is VERY wrong!
+@@ -2605,6 +2611,8 @@ static int timekeeping_validate_timex(co
+ 		/* In order to inject time, you gotta be super-user! */
+ 		if (!capable(CAP_SYS_TIME))
+ 			return -EPERM;
++		if (!ccs_capable(CCS_SYS_SETTIME))
++			return -EPERM;
+ 
+ 		/*
+ 		 * Validate if a timespec/timeval used to inject a time
+--- linux-6.17.13.orig/net/ipv4/raw.c
++++ linux-6.17.13/net/ipv4/raw.c
+@@ -756,6 +756,10 @@ static int raw_recvmsg(struct sock *sk,
+ 	skb = skb_recv_datagram(sk, flags, &err);
+ 	if (!skb)
+ 		goto out;
++	if (ccs_socket_post_recvmsg_permission(sk, skb, flags)) {
++		err = -EAGAIN; /* Hope less harmful than -EPERM. */
++		goto out;
++	}
+ 
+ 	copied = skb->len;
+ 	if (len < copied) {
+--- linux-6.17.13.orig/net/ipv4/udp.c
++++ linux-6.17.13/net/ipv4/udp.c
+@@ -2042,6 +2042,8 @@ try_again:
+ 	skb = __skb_recv_udp(sk, flags, &off, &err);
+ 	if (!skb)
+ 		return err;
++	if (ccs_socket_post_recvmsg_permission(sk, skb, flags))
++		return -EAGAIN; /* Hope less harmful than -EPERM. */
+ 
+ 	ulen = udp_skb_len(skb);
+ 	copied = len;
+--- linux-6.17.13.orig/net/ipv6/raw.c
++++ linux-6.17.13/net/ipv6/raw.c
+@@ -451,6 +451,10 @@ static int rawv6_recvmsg(struct sock *sk
+ 	skb = skb_recv_datagram(sk, flags, &err);
+ 	if (!skb)
+ 		goto out;
++	if (ccs_socket_post_recvmsg_permission(sk, skb, flags)) {
++		err = -EAGAIN; /* Hope less harmful than -EPERM. */
++		goto out;
++	}
+ 
+ 	copied = skb->len;
+ 	if (copied > len) {
+--- linux-6.17.13.orig/net/ipv6/udp.c
++++ linux-6.17.13/net/ipv6/udp.c
+@@ -487,6 +487,8 @@ try_again:
+ 	skb = __skb_recv_udp(sk, flags, &off, &err);
+ 	if (!skb)
+ 		return err;
++	if (ccs_socket_post_recvmsg_permission(sk, skb, flags))
++		return -EAGAIN; /* Hope less harmful than -EPERM. */
+ 
+ 	ulen = udp6_skb_len(skb);
+ 	copied = len;
+--- linux-6.17.13.orig/net/socket.c
++++ linux-6.17.13/net/socket.c
+@@ -1973,6 +1973,10 @@ struct file *do_accept(struct file *file
+ 	if (err < 0)
+ 		goto out_fd;
+ 
++	if (ccs_socket_post_accept_permission(sock, newsock)) {
++		err = -EAGAIN; /* Hope less harmful than -EPERM. */
++		goto out_fd;
++	}
+ 	if (upeer_sockaddr) {
+ 		len = ops->getname(newsock, (struct sockaddr *)&address, 2);
+ 		if (len < 0) {
+--- linux-6.17.13.orig/net/unix/af_unix.c
++++ linux-6.17.13/net/unix/af_unix.c
+@@ -2627,6 +2627,10 @@ int __unix_dgram_recvmsg(struct sock *sk
+ 						EPOLLOUT | EPOLLWRNORM |
+ 						EPOLLWRBAND);
+ 
++	if (ccs_socket_post_recvmsg_permission(sk, skb, flags)) {
++		err = -EAGAIN; /* Hope less harmful than -EPERM. */
++		goto out_unlock;
++	}
+ 	if (msg->msg_name) {
+ 		unix_copy_addr(msg, skb->sk);
+ 
+@@ -2681,6 +2685,7 @@ int __unix_dgram_recvmsg(struct sock *sk
+ 
+ out_free:
+ 	skb_free_datagram(sk, skb);
++out_unlock:
+ 	mutex_unlock(&u->iolock);
+ out:
+ 	return err;
+--- linux-6.17.13.orig/security/Kconfig
++++ linux-6.17.13/security/Kconfig
+@@ -286,5 +286,7 @@ config LSM
+ 
+ source "security/Kconfig.hardening"
+ 
++source "security/ccsecurity/Kconfig"
++
+ endmenu
+ 
+--- linux-6.17.13.orig/security/Makefile
++++ linux-6.17.13/security/Makefile
+@@ -29,3 +29,6 @@ obj-$(CONFIG_SECURITY_IPE)		+= ipe/
+ 
+ # Object integrity file lists
+ obj-$(CONFIG_INTEGRITY)			+= integrity/
++
++subdir-$(CONFIG_CCSECURITY)		+= ccsecurity
++obj-$(CONFIG_CCSECURITY)		+= ccsecurity/
+--- linux-6.17.13.orig/security/security.c
++++ linux-6.17.13/security/security.c
+@@ -1198,7 +1198,9 @@ int security_syslog(int type)
+  */
+ int security_settime64(const struct timespec64 *ts, const struct timezone *tz)
+ {
+-	return call_int_hook(settime, ts, tz);
++	const int ret = call_int_hook(settime, ts, tz);
++
++	return ret ? ret : ccs_settime(ts, tz);
+ }
+ 
+ /**
+@@ -1567,7 +1569,9 @@ int security_sb_statfs(struct dentry *de
+ int security_sb_mount(const char *dev_name, const struct path *path,
+ 		      const char *type, unsigned long flags, void *data)
+ {
+-	return call_int_hook(sb_mount, dev_name, path, type, flags, data);
++	const int ret = call_int_hook(sb_mount, dev_name, path, type, flags, data);
++
++	return ret ? ret : ccs_sb_mount(dev_name, path, type, flags, data);
+ }
+ 
+ /**
+@@ -1581,7 +1585,9 @@ int security_sb_mount(const char *dev_na
+  */
+ int security_sb_umount(struct vfsmount *mnt, int flags)
+ {
+-	return call_int_hook(sb_umount, mnt, flags);
++	const int ret = call_int_hook(sb_umount, mnt, flags);
++
++	return ret ? ret : ccs_sb_umount(mnt, flags);
+ }
+ 
+ /**
+@@ -1596,7 +1602,9 @@ int security_sb_umount(struct vfsmount *
+ int security_sb_pivotroot(const struct path *old_path,
+ 			  const struct path *new_path)
+ {
+-	return call_int_hook(sb_pivotroot, old_path, new_path);
++	const int ret = call_int_hook(sb_pivotroot, old_path, new_path);
++
++	return ret ? ret : ccs_sb_pivotroot(old_path, new_path);
+ }
+ 
+ /**
+@@ -1661,7 +1669,9 @@ EXPORT_SYMBOL(security_sb_clone_mnt_opts
+ int security_move_mount(const struct path *from_path,
+ 			const struct path *to_path)
+ {
+-	return call_int_hook(move_mount, from_path, to_path);
++	const int ret = call_int_hook(move_mount, from_path, to_path);
++
++	return ret ? ret : ccs_move_mount(from_path, to_path);
+ }
+ 
+ /**
+@@ -1894,9 +1904,12 @@ int security_inode_init_security_anon(st
+ int security_path_mknod(const struct path *dir, struct dentry *dentry,
+ 			umode_t mode, unsigned int dev)
+ {
++	int ret;
++
+ 	if (unlikely(IS_PRIVATE(d_backing_inode(dir->dentry))))
+ 		return 0;
+-	return call_int_hook(path_mknod, dir, dentry, mode, dev);
++	ret = call_int_hook(path_mknod, dir, dentry, mode, dev);
++	return ret ? ret : ccs_path_mknod(dir, dentry, mode, dev);
+ }
+ EXPORT_SYMBOL(security_path_mknod);
+ 
+@@ -1927,9 +1940,12 @@ void security_path_post_mknod(struct mnt
+ int security_path_mkdir(const struct path *dir, struct dentry *dentry,
+ 			umode_t mode)
+ {
++	int ret;
++
+ 	if (unlikely(IS_PRIVATE(d_backing_inode(dir->dentry))))
+ 		return 0;
+-	return call_int_hook(path_mkdir, dir, dentry, mode);
++	ret = call_int_hook(path_mkdir, dir, dentry, mode);
++	return ret ? ret : ccs_path_mkdir(dir, dentry, mode);
+ }
+ EXPORT_SYMBOL(security_path_mkdir);
+ 
+@@ -1944,9 +1960,12 @@ EXPORT_SYMBOL(security_path_mkdir);
+  */
+ int security_path_rmdir(const struct path *dir, struct dentry *dentry)
+ {
++	int ret;
++
+ 	if (unlikely(IS_PRIVATE(d_backing_inode(dir->dentry))))
+ 		return 0;
+-	return call_int_hook(path_rmdir, dir, dentry);
++	ret = call_int_hook(path_rmdir, dir, dentry);
++	return ret ? ret : ccs_path_rmdir(dir, dentry);
+ }
+ 
+ /**
+@@ -1960,9 +1979,12 @@ int security_path_rmdir(const struct pat
+  */
+ int security_path_unlink(const struct path *dir, struct dentry *dentry)
+ {
++	int ret;
++
+ 	if (unlikely(IS_PRIVATE(d_backing_inode(dir->dentry))))
+ 		return 0;
+-	return call_int_hook(path_unlink, dir, dentry);
++	ret = call_int_hook(path_unlink, dir, dentry);
++	return ret ? ret : ccs_path_unlink(dir, dentry);
+ }
+ EXPORT_SYMBOL(security_path_unlink);
+ 
+@@ -1979,9 +2001,12 @@ EXPORT_SYMBOL(security_path_unlink);
+ int security_path_symlink(const struct path *dir, struct dentry *dentry,
+ 			  const char *old_name)
+ {
++	int ret;
++
+ 	if (unlikely(IS_PRIVATE(d_backing_inode(dir->dentry))))
+ 		return 0;
+-	return call_int_hook(path_symlink, dir, dentry, old_name);
++	ret = call_int_hook(path_symlink, dir, dentry, old_name);
++	return ret ? ret : ccs_path_symlink(dir, dentry, old_name);
+ }
+ 
+ /**
+@@ -1997,9 +2022,12 @@ int security_path_symlink(const struct p
+ int security_path_link(struct dentry *old_dentry, const struct path *new_dir,
+ 		       struct dentry *new_dentry)
+ {
++	int ret;
++
+ 	if (unlikely(IS_PRIVATE(d_backing_inode(old_dentry))))
+ 		return 0;
+-	return call_int_hook(path_link, old_dentry, new_dir, new_dentry);
++	ret = call_int_hook(path_link, old_dentry, new_dir, new_dentry);
++	return ret ? ret : ccs_path_link(old_dentry, new_dir, new_dentry);
+ }
+ 
+ /**
+@@ -2018,13 +2046,17 @@ int security_path_rename(const struct pa
+ 			 const struct path *new_dir, struct dentry *new_dentry,
+ 			 unsigned int flags)
+ {
++	int ret;
++
+ 	if (unlikely(IS_PRIVATE(d_backing_inode(old_dentry)) ||
+ 		     (d_is_positive(new_dentry) &&
+ 		      IS_PRIVATE(d_backing_inode(new_dentry)))))
+ 		return 0;
+ 
+-	return call_int_hook(path_rename, old_dir, old_dentry, new_dir,
+-			     new_dentry, flags);
++	ret = call_int_hook(path_rename, old_dir, old_dentry, new_dir,
++			    new_dentry, flags);
++	return ret ? ret : ccs_path_rename(old_dir, old_dentry, new_dir,
++					   new_dentry, flags);
+ }
+ EXPORT_SYMBOL(security_path_rename);
+ 
+@@ -2040,9 +2072,12 @@ EXPORT_SYMBOL(security_path_rename);
+  */
+ int security_path_truncate(const struct path *path)
+ {
++	int ret;
++
+ 	if (unlikely(IS_PRIVATE(d_backing_inode(path->dentry))))
+ 		return 0;
+-	return call_int_hook(path_truncate, path);
++	ret = call_int_hook(path_truncate, path);
++	return ret ? ret : ccs_path_truncate(path);
+ }
+ 
+ /**
+@@ -2058,9 +2093,12 @@ int security_path_truncate(const struct
+  */
+ int security_path_chmod(const struct path *path, umode_t mode)
+ {
++	int ret;
++
+ 	if (unlikely(IS_PRIVATE(d_backing_inode(path->dentry))))
+ 		return 0;
+-	return call_int_hook(path_chmod, path, mode);
++	ret = call_int_hook(path_chmod, path, mode);
++	return ret ? ret : ccs_path_chmod(path, mode);
+ }
+ 
+ /**
+@@ -2075,9 +2113,12 @@ int security_path_chmod(const struct pat
+  */
+ int security_path_chown(const struct path *path, kuid_t uid, kgid_t gid)
+ {
++	int ret;
++
+ 	if (unlikely(IS_PRIVATE(d_backing_inode(path->dentry))))
+ 		return 0;
+-	return call_int_hook(path_chown, path, uid, gid);
++	ret = call_int_hook(path_chown, path, uid, gid);
++	return ret ? ret : ccs_path_chown(path, uid, gid);
+ }
+ 
+ /**
+@@ -2090,7 +2131,9 @@ int security_path_chown(const struct pat
+  */
+ int security_path_chroot(const struct path *path)
+ {
+-	return call_int_hook(path_chroot, path);
++	const int ret = call_int_hook(path_chroot, path);
++
++	return ret ? ret : ccs_path_chroot(path);
+ }
+ #endif /* CONFIG_SECURITY_PATH */
+ 
+@@ -2372,9 +2415,12 @@ void security_inode_post_setattr(struct
+  */
+ int security_inode_getattr(const struct path *path)
+ {
++	int ret;
++
+ 	if (unlikely(IS_PRIVATE(d_backing_inode(path->dentry))))
+ 		return 0;
+-	return call_int_hook(inode_getattr, path);
++	ret = call_int_hook(inode_getattr, path);
++	return ret ? ret : ccs_inode_getattr(path);
+ }
+ 
+ /**
+@@ -2940,7 +2986,9 @@ void security_file_free(struct file *fil
+  */
+ int security_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ {
+-	return call_int_hook(file_ioctl, file, cmd, arg);
++	const int ret = call_int_hook(file_ioctl, file, cmd, arg);
++
++	return ret ? ret : ccs_file_ioctl(file, cmd, arg);
+ }
+ EXPORT_SYMBOL_GPL(security_file_ioctl);
+ 
+@@ -2958,7 +3006,9 @@ EXPORT_SYMBOL_GPL(security_file_ioctl);
+ int security_file_ioctl_compat(struct file *file, unsigned int cmd,
+ 			       unsigned long arg)
+ {
+-	return call_int_hook(file_ioctl_compat, file, cmd, arg);
++	const int ret = call_int_hook(file_ioctl_compat, file, cmd, arg);
++
++	return ret ? ret : ccs_file_ioctl(file, cmd, arg);
+ }
+ EXPORT_SYMBOL_GPL(security_file_ioctl_compat);
+ 
+@@ -3073,7 +3123,9 @@ int security_file_lock(struct file *file
+  */
+ int security_file_fcntl(struct file *file, unsigned int cmd, unsigned long arg)
+ {
+-	return call_int_hook(file_fcntl, file, cmd, arg);
++	const int ret = call_int_hook(file_fcntl, file, cmd, arg);
++
++	return ret ? ret : ccs_file_fcntl(file, cmd, arg);
+ }
+ 
+ /**
+@@ -3141,7 +3193,9 @@ int security_file_receive(struct file *f
+  */
+ int security_file_open(struct file *file)
+ {
+-	return call_int_hook(file_open, file);
++	const int ret = call_int_hook(file_open, file);
++
++	return ret ? ret : ccs_file_open(file);
+ }
+ 
+ /**
+@@ -3173,7 +3227,9 @@ EXPORT_SYMBOL_GPL(security_file_post_ope
+  */
+ int security_file_truncate(struct file *file)
+ {
+-	return call_int_hook(file_truncate, file);
++	const int ret = call_int_hook(file_truncate, file);
++
++	return ret ? ret : ccs_path_truncate(&file->f_path);
+ }
+ 
+ /**
+@@ -3191,7 +3247,9 @@ int security_task_alloc(struct task_stru
+ 
+ 	if (rc)
+ 		return rc;
+-	rc = call_int_hook(task_alloc, task, clone_flags);
++	rc = ccs_alloc_task_security(task);
++	if (likely(!rc))
++		rc = call_int_hook(task_alloc, task, clone_flags);
+ 	if (unlikely(rc))
+ 		security_task_free(task);
+ 	return rc;
+@@ -3207,6 +3265,7 @@ int security_task_alloc(struct task_stru
+ void security_task_free(struct task_struct *task)
+ {
+ 	call_void_hook(task_free, task);
++	ccs_free_task_security(task);
+ 
+ 	kfree(task->security);
+ 	task->security = NULL;
+@@ -4580,7 +4639,9 @@ EXPORT_SYMBOL(security_unix_may_send);
+  */
+ int security_socket_create(int family, int type, int protocol, int kern)
+ {
+-	return call_int_hook(socket_create, family, type, protocol, kern);
++	const int ret = call_int_hook(socket_create, family, type, protocol, kern);
++
++	return ret ? ret : ccs_socket_create(family, type, protocol, kern);
+ }
+ 
+ /**
+@@ -4639,7 +4700,9 @@ EXPORT_SYMBOL(security_socket_socketpair
+ int security_socket_bind(struct socket *sock,
+ 			 struct sockaddr *address, int addrlen)
+ {
+-	return call_int_hook(socket_bind, sock, address, addrlen);
++	const int ret = call_int_hook(socket_bind, sock, address, addrlen);
++
++	return ret ? ret : ccs_socket_bind(sock, address, addrlen);
+ }
+ 
+ /**
+@@ -4656,7 +4719,9 @@ int security_socket_bind(struct socket *
+ int security_socket_connect(struct socket *sock,
+ 			    struct sockaddr *address, int addrlen)
+ {
+-	return call_int_hook(socket_connect, sock, address, addrlen);
++	const int ret = call_int_hook(socket_connect, sock, address, addrlen);
++
++	return ret ? ret : ccs_socket_connect(sock, address, addrlen);
+ }
+ 
+ /**
+@@ -4670,7 +4735,9 @@ int security_socket_connect(struct socke
+  */
+ int security_socket_listen(struct socket *sock, int backlog)
+ {
+-	return call_int_hook(socket_listen, sock, backlog);
++	const int ret = call_int_hook(socket_listen, sock, backlog);
++
++	return ret ? ret : ccs_socket_listen(sock, backlog);
+ }
+ 
+ /**
+@@ -4701,7 +4768,9 @@ int security_socket_accept(struct socket
+  */
+ int security_socket_sendmsg(struct socket *sock, struct msghdr *msg, int size)
+ {
+-	return call_int_hook(socket_sendmsg, sock, msg, size);
++	const int ret = call_int_hook(socket_sendmsg, sock, msg, size);
++
++	return ret ? ret : ccs_socket_sendmsg(sock, msg, size);
+ }
+ 
+ /**

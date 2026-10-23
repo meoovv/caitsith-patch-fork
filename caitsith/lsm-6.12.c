@@ -112,6 +112,8 @@ static void cs_task_free_security(struct task_struct *p)
 	 */
 	if (r) {
 		cs_debug_trace("2");
+		cs_acl_groups_put(r->previous_acl_groups);
+		cs_clear_request_info(r);
 		kfree(r->handler_path);
 		kfree(r);
 		ptr->r = NULL;
@@ -136,6 +138,8 @@ static void __cs_free_task_security(const struct task_struct *task)
 	spin_lock_irqsave(&cs_task_security_list_lock, flags);
 	list_del_rcu(&ptr->list);
 	spin_unlock_irqrestore(&cs_task_security_list_lock, flags);
+
+	cs_acl_groups_put(ptr->acl_groups);
 	kfree_rcu(ptr, rcu);
 }
 
@@ -1923,6 +1927,9 @@ static int __cs_alloc_task_security(const struct task_struct *task)
 	new_security->task = task;
 	new_security->cs_domain_info = old_security->cs_domain_info;
 	new_security->cs_flags = old_security->cs_flags;
+	new_security->acl_groups = old_security->acl_groups;
+	if (new_security->acl_groups)
+		atomic_inc(&new_security->acl_groups->head.users);
 	cs_add_task_security(new_security, list);
 	return 0;
 }

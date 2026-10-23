@@ -41,6 +41,8 @@ static void cs_try_to_gc(const enum cs_policy_id type,
  */
 struct srcu_struct cs_ss;
 
+
+LIST_HEAD(cs_acl_groups_list);
 /***** SECTION6: Dependent functions section *****/
 
 /**
@@ -205,6 +207,13 @@ static inline void cs_del_domain(struct list_head *element)
 	cs_put_name(domain->domainname);
 }
 
+static inline void cs_del_acl_groups(struct list_head *element) {
+	struct cs_acl_groups *g = container_of(element, typeof(*g), head.list);
+	u8 i;
+	for (i = 0; i < g->len; i++)
+		cs_put_name(g->names[i]);
+}
+
 /**
  * cs_del_string_group - Delete members in "struct cs_string_group".
  *
@@ -343,6 +352,9 @@ static void cs_try_to_gc(const enum cs_policy_id type,
 			goto reinject;
 		cs_del_acl(element);
 		break;
+	case CS_ID_ACL_GROUPS:
+		cs_del_acl_groups(element);
+		break;
 	case CS_ID_DOMAIN:
 		/*
 		 * Don't kfree() until all "struct task_struct" forget this
@@ -427,7 +439,6 @@ static void cs_collect_acl(struct list_head *list)
 static void cs_collect_entry(void)
 {
 	int i;
-
 	mutex_lock(&cs_policy_lock);
 	{
 		struct cs_domain_info *domain;
@@ -439,6 +450,17 @@ static void cs_collect_entry(void)
 				continue;
 			cs_try_to_gc(CS_ID_DOMAIN, &domain->list);
 		}
+	}
+	{  
+		struct cs_shared_acl_head *ptr;  
+		struct cs_shared_acl_head *tmp;
+  
+		list_for_each_entry_safe(ptr, tmp, &cs_acl_groups_list, list) {  
+			if (atomic_read(&ptr->users) > 0)  
+				continue;  
+			atomic_set(&ptr->users, CS_GC_IN_PROGRESS);  
+			cs_try_to_gc(CS_ID_ACL_GROUPS, &ptr->list);  
+		}  
 	}
 	for (i = 0; i < CS_MAX_MAC_INDEX; i++) {
 		struct cs_acl_info *ptr;
@@ -536,6 +558,13 @@ out:
 	/* This acts as do_exit(0). */
 	return 0;
 }
+
+void cs_kick_gc(void) {
+	struct task_struct *t = kthread_create(cs_gc_thread, NULL, "CaitSith's GC"); 
+	if (!IS_ERR(t))
+		wake_up_process(t); 
+}
+
 
 /**
  * cs_notify_gc - Register/unregister /sys/kernel/security/caitsith/ users.

@@ -1,0 +1,2 @@
+./test.o
+./probe.o

@@ -1,0 +1,1 @@
+savedcmd_caitsith_test.ko := ld -r -m elf_x86_64 -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T /usr/src/linux-headers-7.1.5-0-stable/scripts/module.lds -o caitsith_test.ko caitsith_test.o caitsith_test.mod.o .module-common.o

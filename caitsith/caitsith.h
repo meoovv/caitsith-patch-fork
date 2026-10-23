@@ -337,6 +337,8 @@ enum cs_conditions_index {
 #endif
 	CS_ARGV_ENTRY,
 	CS_ENVP_ENTRY,
+	CS_ACL_GROUP,
+	CS_SELF_ACL_GROUP,
 	CS_PATH_ATTRIBUTE_START = 192,
 	CS_PATH_ATTRIBUTE_END = 255
 } __packed;
@@ -505,6 +507,7 @@ enum cs_policy_id {
 	CS_ID_NAME,
 	CS_ID_ACL,
 	CS_ID_DOMAIN,
+	CS_ID_ACL_GROUPS,
 	CS_MAX_POLICY
 } __packed;
 
@@ -556,6 +559,9 @@ enum cs_value_type {
  */
 #define CS_HASH_BITS 8
 #define CS_MAX_HASH (1u << CS_HASH_BITS)
+
+#define CS_MAX_ACL_GROUPS 60
+#define CS_ACL_GROUPS_INLINE 4
 
 /*
  * CaitSith checks only SOCK_STREAM, SOCK_DGRAM, SOCK_RAW, SOCK_SEQPACKET.
@@ -620,6 +626,8 @@ struct cs_acl_info {
 	u16 priority;
 	u8 audit;
 };
+
+extern struct list_head cs_acl_groups_list;
 
 /* Structure for "string_group"/"number_group"/"ip_group" directive. */
 struct cs_group {
@@ -741,6 +749,7 @@ struct cs_request_info {
 	struct {
 		struct linux_binprm *bprm;
 		struct cs_domain_info *previous_domain;
+		struct cs_acl_groups *previous_acl_groups;
 		/* For execute_handler. */
 		char *handler; /* kstrdup(handler_path->name, GFP_NOFS) */
 		/* For dumping argv[] and envp[]. */
@@ -766,6 +775,12 @@ struct cs_request_info {
 	const struct cs_path_info *transition;
 	const struct cs_path_info *handler_path_candidate;
 	const struct cs_path_info *transition_candidate;
+
+	const struct cs_path_info *acl_group_candidates[CS_ACL_GROUPS_INLINE];
+	const struct cs_path_info **acl_group_candidates_ext;
+	u8 acl_group_count;
+	struct cs_acl_groups *acl_groups;
+
 	/*
 	 * For holding operation index used for this request.
 	 * One of values in "enum cs_mac_index".
@@ -796,6 +811,14 @@ struct cs_domain_info {
 	/* Name of this domain. Never NULL. */
 	const struct cs_path_info *domainname;
 };
+
+struct cs_acl_groups {
+	struct cs_shared_acl_head head;
+	u8 len;
+	const struct cs_path_info *names[];	
+};
+
+
 
 /* Structure for holding string data. */
 struct cs_name {
@@ -934,6 +957,10 @@ int cs_getattr_permission(const struct path *path);
 bool cs_capable(const u8 operation);
 int cs_open_permission(const struct path *path, const int flag);
 
+
+void cs_clear_request_info(struct cs_request_info *r);
+void cs_kick_gc(void);
+bool cs_memory_ok(const void *ptr);
 /* Variable definition for internal use. */
 
 extern bool cs_policy_loaded;
@@ -1077,6 +1104,13 @@ static inline void cs_put_name(const struct cs_path_info *name)
 			   head.users);
 }
 
+static inline void cs_acl_groups_put(struct cs_acl_groups *g)  
+{  
+	if (!g || !atomic_dec_and_test(&g->head.users))  
+		return;  
+	cs_kick_gc();
+}
+
 /* For importing variables and functions. */
 extern struct caitsith_exports caitsith_exports;
 
@@ -1118,6 +1152,7 @@ struct cs_security {
 	const struct cred *cred; /* Maybe NULL. */
 #endif
 	struct cs_domain_info *cs_domain_info;
+	struct cs_acl_groups *acl_groups;
 	u32 cs_flags;
 	struct cs_request_info *r; /* Maybe NULL. */
 	struct rcu_head rcu;
@@ -1171,6 +1206,22 @@ static inline struct cs_domain_info *cs_task_domain(struct task_struct *task)
 static inline struct cs_domain_info *cs_current_domain(void)
 {
 	return cs_find_task_security(current)->cs_domain_info;
+}
+
+
+static inline struct cs_acl_groups *cs_task_acl_groups(const struct task_struct *task){
+	return cs_find_task_security(task)->acl_groups;
+}
+
+static inline bool cs_acl_group_contains(const struct cs_acl_groups *g, const struct cs_path_info *name)
+{
+	u8 i;
+	if (!g) return false;
+	
+	for(i=0; i<g->len; i++){
+		if (g->names[i] == name) return true;
+	}
+	return false;
 }
 
 /**

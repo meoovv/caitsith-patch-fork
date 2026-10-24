@@ -278,6 +278,9 @@ static const struct {
 	const enum cs_conditions_index cmd;
 	const u64 available;
 } cs_conditions[] = {
+	// TODO: move on
+	{ "acl_group", CS_TYPE_ASSIGN, CS_TYPE_INVALID, CS_ACL_GROUP, F(CS_MAC_EXECUTE) },
+	{ "task.acl_group", CS_TYPE_STRING, CS_TYPE_STRING, CS_SELF_ACL_GROUP, CS_ALL_OK },
 	{ "addr",                    CS_TYPE_STRING,   CS_TYPE_STRING,
 	  CS_COND_SARG0,            CS_UNIX_SOCKET_OK },
 	{ "argc",                    CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
@@ -856,7 +859,7 @@ static bool cs_correct_word(const char *string);
 static bool cs_flush(struct cs_io_buffer *head);
 static bool cs_print_condition(struct cs_io_buffer *head,
 			       const struct cs_condition *cond);
-static bool cs_memory_ok(const void *ptr);
+bool cs_memory_ok(const void *ptr);
 static bool cs_read_acl(struct cs_io_buffer *head,
 			const struct cs_acl_info *acl);
 static bool cs_read_group(struct cs_io_buffer *head);
@@ -1308,7 +1311,7 @@ void cs_warn_oom(const char *function)
  *
  * Caller holds cs_policy_lock mutex.
  */
-static bool cs_memory_ok(const void *ptr)
+bool cs_memory_ok(const void *ptr)
 {
 	if (ptr) {
 		const size_t s = cs_ksize(ptr);
@@ -2016,6 +2019,7 @@ static struct cs_condition *cs_get_condition(struct cs_io_buffer *head)
 	union cs_condition_element *condp;
 	struct cs_cond_tmp tmp;
 	const enum cs_mac_index type = head->w.acl_index;
+	u8 acl_group_count = 0;
 #ifdef CONFIG_CAITSITH_EXECUTE_HANDLER
 	bool handler_path_done = head->w.is_deny ||
 		type != CS_MAC_EXECUTE;
@@ -2056,6 +2060,12 @@ static struct cs_condition *cs_get_condition(struct cs_io_buffer *head)
 		}
 		if (!cs_parse_cond(&tmp, head))
 			goto out;
+		if (tmp.left == CS_ACL_GROUP) {
+			if (head->w.is_deny) goto out;
+			// XXX could be just =
+			if (acl_group_count >= CS_MAX_ACL_GROUPS) goto out;
+			acl_group_count++;
+		}
 		if (tmp.left == CS_HANDLER_PATH) {
 			if (handler_path_done)
 				goto out;

@@ -221,7 +221,7 @@ static void cs_clear_open_mode(void);
 static void cs_save_open_mode(int mode);
 #endif
 static void cs_check_auto_domain_transition(void);
-static void cs_clear_request_info(struct cs_request_info *r);
+void cs_clear_request_info(struct cs_request_info *r);
 static void cs_finish_execve(int retval, struct cs_request_info *r);
 
 #ifdef CONFIG_CAITSITH_ENVIRON
@@ -426,6 +426,9 @@ struct cs_domain_info cs_kernel_domain;
 /* The list for "struct cs_domain_info". */
 LIST_HEAD(cs_domain_list);
 
+
+LIST_HEAD(cs_acl_groups_list);
+
 /* The list for ACL policy. */
 struct list_head cs_acl_list[CS_MAX_MAC_INDEX];
 
@@ -433,6 +436,67 @@ struct list_head cs_acl_list[CS_MAX_MAC_INDEX];
 struct cs_path_info cs_null_name;
 
 /***** SECTION6: Dependent functions section *****/
+/* 
+	SAFETY: invalid i and r are prevented in cs_acl_group_get():
+			!(acl_group_candidates_ext == NULL && i > 4) and !(i > CS_MAX_ACL_GROUPS) is forced  on
+			callee's side using acl_group_count which is forced to be less or equal to
+			CS_MAX_ACL_GROUP in cs_get_condition() and cs_condition()
+*/
+// will give name from index i of request_info r
+static const struct cs_path_info *cs_acl_group_get_at(const struct cs_request_info *r, const u8 i) {  
+	return i < CS_ACL_GROUPS_INLINE  
+		? r->acl_group_candidates[i]  
+		: r->acl_group_candidates_ext[i - CS_ACL_GROUPS_INLINE];  
+}  
+
+static struct cs_acl_groups *cs_acl_groups_get(const struct cs_request_info *r)  {  
+	const u8 n = r->acl_group_count;  
+	u8 i;
+	  
+	if (!n)  
+		return NULL; 
+
+	struct cs_acl_groups *g;  
+	
+	mutex_lock(&cs_policy_lock); // guard against GC
+
+	list_for_each_entry(g, &cs_acl_groups_list, head.list) {  
+		const int users = atomic_read(&g->head.users);
+
+		if (users == CS_GC_IN_PROGRESS || g->len != n)  
+			continue;  
+		for (i = 0; i < n && g->names[i] == cs_acl_group_get_at(r, i); i++)  
+			;  
+		if (i == n)  
+			goto exists;  
+	}  
+	g = kzalloc(sizeof(*g) + n * sizeof(g->names[0]), GFP_NOFS);  
+	if (!g) {
+		goto out;  
+	} else if (!cs_memory_ok(g)) {
+		// follow quotas	
+		kfree(g);
+		g = NULL;
+		goto out;
+	}
+	// will be incremented in exists:
+	atomic_set(&g->head.users, 0);  
+	g->len = n;  
+	for (i = 0; i < n; i++) {  
+		g->names[i] = cs_acl_group_get_at(r, i);  
+		// inline only once
+		atomic_inc(&container_of(g->names[i], struct cs_name, entry)->head.users);  
+	}  
+	list_add_rcu(&g->head.list, &cs_acl_groups_list);  
+	// falls to exists: 
+exists:
+	atomic_inc(&g->head.users);  
+out:  
+	mutex_unlock(&cs_policy_lock);  
+	return g;  
+}
+
+
 
 /**
  * cs_path_matches_group - Check whether the given pathname matches members of the given pathname group.
@@ -537,6 +601,7 @@ retry:
 					 srcu_read_lock_held(&cs_ss)) {
 			r->transition_candidate = NULL;
 			r->handler_path_candidate = NULL;
+			r->acl_group_count = 0;
 			if (!cs_check_entry(r, ptr2)) {
 				if (unlikely(r->failed_by_oom))
 					goto oom;
@@ -553,7 +618,15 @@ retry:
 			/* Set the first matching execute handler entry. */
 			if (r->handler_path_candidate && !r->handler_path)
 				r->handler_path = r->handler_path_candidate;
+			// Set the first matching acl groups entry
+			// TODO: should be reworked like domains and execute handlers. we should set persistant field there and do allocation in cs_execute.
+			// XXX rnt those already the same? get() unites candidates and group_count acts as marker of presence.
+			if (r->acl_group_count && !r->acl_groups) {
+				r->acl_groups = cs_acl_groups_get(r);
+				if (!r->acl_groups) goto oom;
+			}
 			break;
+
 		}
 		error = cs_audit_log(r);
 		/* Ignore out of memory during audit. */
@@ -661,11 +734,23 @@ static int cs_execute(struct cs_request_info *r)
 			return retval;
 	}
 #endif
+
+{
+	struct cs_security *current_sec = cs_current_security();
 	/*
 	 * Tell GC that I started execve().
 	 * Also, tell open_exec() to check read permission.
 	 */
-	cs_current_security()->cs_flags |= CS_TASK_IS_IN_EXECVE;
+	current_sec->cs_flags |= CS_TASK_IS_IN_EXECVE;
+
+	if (r->acl_groups) {
+		if (current_sec->cs_acl_groups)
+			cs_acl_groups_put(current_sec->cs_acl_groups);
+		current_sec->cs_acl_groups = r->acl_groups;
+		r->acl_groups = NULL; 
+	}
+}
+
 	if (!r->transition || r->transition == &cs_null_name)
 		/* Keep current domain. */
 		return 0;
@@ -1089,6 +1174,9 @@ static int cs_start_execve(struct linux_binprm *bprm,
 	idx = cs_read_lock();
 	/* r->dump->data is allocated by cs_dump_page(). */
 	r->previous_domain = task->cs_domain_info;
+	r->previous_acl_groups = task->cs_acl_groups;
+	if(r->previous_acl_groups)
+		atomic_inc(&r->previous_acl_groups->head.users);
 	/* Clear manager flag. */
 	task->cs_flags &= ~CS_TASK_IS_MANAGER;
 	*rp = r;
@@ -1129,6 +1217,9 @@ static void cs_finish_execve(int retval, struct cs_request_info *r)
 		return;
 	task = cs_current_security();
 	if (retval < 0) {
+		cs_acl_groups_put(task->cs_acl_groups);
+		task->cs_acl_groups = r->previous_acl_groups; 
+
 		task->cs_domain_info = r->previous_domain;
 		/*
 		 * Make task->cs_domain_info visible to GC before changing
@@ -1136,6 +1227,8 @@ static void cs_finish_execve(int retval, struct cs_request_info *r)
 		 */
 		smp_wmb();
 	} else {
+		cs_acl_groups_put(r->previous_acl_groups);
+
 		/* Mark the current process as execute handler. */
 		if (r->handler)
 			task->cs_flags |= CS_TASK_IS_EXECUTE_HANDLER;
@@ -3445,6 +3538,8 @@ static bool cs_cond2arg(struct cs_cond_arg *arg,
 	case CS_COND_NARG2:
 		value = param->i[2];
 		break;
+	case CS_ACL_GROUP:
+	case CS_SELF_ACL_GROUP:
 	case CS_HANDLER_PATH:
 	case CS_TRANSIT_DOMAIN:
 	case CS_COND_IPARG:
@@ -3764,8 +3859,57 @@ static bool cs_condition(struct cs_request_info *r,
 			r->handler_path_candidate = right.name;
 			continue;
 		}
+		if (left_op == CS_SELF_ACL_GROUP) {
+			const struct cs_acl_groups *g = cs_current_security()->cs_acl_groups;
+			u8 i;
+			bool found = false;
+
+			if (right.type == CS_ARG_TYPE_NAME)
+				right.group = NULL;
+			else if (right.type == CS_ARG_TYPE_GROUP)
+				right.name = NULL;
+			else
+				return false;
+
+			printk(KERN_INFO "CaitSith: SELF_ACL_GROUP: begin\n");
+
+			for (i=0; g && i < g->len; i++) {
+				printk(KERN_INFO "CaitSith: SELF_ACL_GROUP: going through acl group: %hhu\n", i);
+				if (cs_path_matches_group_or_pattern(g->names[i], right.group, right.name, true)) {
+					found = true;
+					break;
+				}
+			} 
+			if (found == match) {
+				printk(KERN_INFO "CaitSith: SELF_ACL_GROUP: match!");
+				continue;
+			}
+			return false;
+		}
 		if (left_op == CS_TRANSIT_DOMAIN) {
 			r->transition_candidate = right.name;
+			continue;
+		}
+		if (left_op == CS_ACL_GROUP) {
+			const u8 n = r->acl_group_count;
+
+			if (n >= CS_MAX_ACL_GROUPS)
+				return false;
+			if (n < CS_ACL_GROUPS_INLINE) {
+				r->acl_group_candidates[n] = right.name;
+			} else {
+				if (!r->acl_group_candidates_ext) {
+					r->acl_group_candidates_ext = kcalloc(CS_MAX_ACL_GROUPS - CS_ACL_GROUPS_INLINE, 
+														sizeof(*r->acl_group_candidates_ext),
+														GFP_NOFS);
+					if (!r->acl_group_candidates_ext) {
+						r->failed_by_oom = true;
+						return false;
+					}
+				}
+				r->acl_group_candidates_ext[n - CS_ACL_GROUPS_INLINE] = right.name;
+			}
+			r->acl_group_count++;
 			continue;
 		}
 		return false;
@@ -4080,7 +4224,7 @@ static bool cs_path_matches_pattern(const struct cs_path_info *filename,
  *
  * Returns nothing.
  */
-static void cs_clear_request_info(struct cs_request_info *r)
+void cs_clear_request_info(struct cs_request_info *r)
 {
 	u8 i;
 	/*
@@ -4100,4 +4244,10 @@ static void cs_clear_request_info(struct cs_request_info *r)
 	}
 	kfree(r->exename.name);
 	r->exename.name = NULL;
+
+	cs_acl_groups_put(r->acl_groups);
+	r->acl_groups = NULL;
+	kfree(r->acl_group_candidates_ext);
+	r->acl_group_candidates_ext = NULL;
+	r->acl_group_count = 0;
 }

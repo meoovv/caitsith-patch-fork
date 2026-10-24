@@ -233,14 +233,15 @@ enum cs_conditions_index {
 				  *  CS_TASK_IS_EXECUTE_HANDLER
 				  */
 	CS_SELF_DOMAIN,
+	CS_SELF_ACL_GROUP,
 	CS_SELF_EXE,
 	CS_EXEC_ARGC,            /* "struct linux_binprm *"->argc */
 	CS_EXEC_ENVC,            /* "struct linux_binprm *"->envc */
 	CS_OBJ_IS_SOCKET,        /* S_IFSOCK */
 	CS_OBJ_IS_SYMLINK,       /* S_IFLNK */
 	CS_OBJ_IS_FILE,          /* S_IFREG */
-	CS_OBJ_IS_BLOCK_DEV,     /* S_IFBLK */
 	/* 20 */
+	CS_OBJ_IS_BLOCK_DEV,     /* S_IFBLK */
 	CS_OBJ_IS_DIRECTORY,     /* S_IFDIR */
 	CS_OBJ_IS_CHAR_DEV,      /* S_IFCHR */
 	CS_OBJ_IS_FIFO,          /* S_IFIFO */
@@ -250,8 +251,8 @@ enum cs_conditions_index {
 	CS_MODE_OWNER_READ,      /* S_IRUSR */
 	CS_MODE_OWNER_WRITE,     /* S_IWUSR */
 	CS_MODE_OWNER_EXECUTE,   /* S_IXUSR */
-	CS_MODE_GROUP_READ,      /* S_IRGRP */
 	/* 30 */
+	CS_MODE_GROUP_READ,      /* S_IRGRP */
 	CS_MODE_GROUP_WRITE,     /* S_IWGRP */
 	CS_MODE_GROUP_EXECUTE,   /* S_IXGRP */
 	CS_MODE_OTHERS_READ,     /* S_IROTH */
@@ -259,10 +260,11 @@ enum cs_conditions_index {
 	CS_MODE_OTHERS_EXECUTE,  /* S_IXOTH */
 	CS_TASK_EXECUTE_HANDLER, /* CS_TASK_IS_EXECUTE_HANDLER */
 	CS_HANDLER_PATH,
+	CS_ACL_GROUP,
 	CS_TRANSIT_DOMAIN,
+	/* 40 */
 	CS_COND_SARG0,
 	CS_COND_SARG1,
-	/* 40 */
 	CS_COND_SARG2,
 	CS_COND_SARG3,
 	CS_COND_NARG0,
@@ -271,9 +273,9 @@ enum cs_conditions_index {
 	CS_COND_IPARG,
 	CS_COND_DOMAIN,
 	CS_IMM_GROUP,
+	/* 50 */
 	CS_IMM_NAME_ENTRY,
 	CS_IMM_NUMBER_ENTRY1,
-	/* 50 */
 	CS_IMM_NUMBER_ENTRY2,
 #ifdef CONFIG_CAITSITH_NETWORK
 	CS_IMM_IPV4ADDR_ENTRY1,
@@ -491,6 +493,7 @@ enum cs_policy_id {
 	CS_ID_NAME,
 	CS_ID_ACL,
 	CS_ID_DOMAIN,
+	CS_ID_ACL_GROUPS,
 	CS_MAX_POLICY
 } __packed;
 
@@ -542,6 +545,9 @@ enum cs_value_type {
  */
 #define CS_HASH_BITS 8
 #define CS_MAX_HASH (1u << CS_HASH_BITS)
+
+#define CS_MAX_ACL_GROUPS 60
+#define CS_ACL_GROUPS_INLINE 4
 
 /*
  * TOMOYO checks only SOCK_STREAM, SOCK_DGRAM, SOCK_RAW, SOCK_SEQPACKET.
@@ -606,6 +612,9 @@ struct cs_acl_info {
 	u16 priority;
 	u8 audit;
 };
+
+
+extern struct list_head cs_acl_groups_list;
 
 /* Structure for "string_group"/"number_group"/"ip_group" directive. */
 struct cs_group {
@@ -727,6 +736,7 @@ struct cs_request_info {
 	struct {
 		struct linux_binprm *bprm;
 		struct cs_domain_info *previous_domain;
+		struct cs_acl_groups *previous_acl_groups;
 		/* For execute_handler. */
 		char *handler; /* kstrdup(handler_path->name, GFP_NOFS) */
 		/* For dumping argv[] and envp[]. */
@@ -752,6 +762,14 @@ struct cs_request_info {
 	const struct cs_path_info *transition;
 	const struct cs_path_info *handler_path_candidate;
 	const struct cs_path_info *transition_candidate;
+
+
+	const struct cs_path_info *acl_group_candidates[CS_ACL_GROUPS_INLINE];
+	const struct cs_path_info **acl_group_candidates_ext;
+	u8 acl_group_count;
+	struct cs_acl_groups *acl_groups;
+
+
 	/*
 	 * For holding operation index used for this request.
 	 * One of values in "enum cs_mac_index".
@@ -782,6 +800,13 @@ struct cs_domain_info {
 	/* Name of this domain. Never NULL. */
 	const struct cs_path_info *domainname;
 };
+
+struct cs_acl_groups {
+	struct cs_shared_acl_head head;
+	u8 len;
+	const struct cs_path_info *names[];	
+};
+
 
 /* Structure for holding string data. */
 struct cs_name {
@@ -879,6 +904,10 @@ void cs_notify_gc(struct cs_io_buffer *head, const bool is_register);
 void cs_populate_patharg(struct cs_request_info *r, const bool first);
 void cs_transition_failed(const char *domainname);
 void cs_warn_oom(const char *function);
+
+void cs_clear_request_info(struct cs_request_info *r);
+void cs_kick_gc(void);
+bool cs_memory_ok(const void *ptr);
 
 /* Variable definition for internal use. */
 
@@ -1023,6 +1052,15 @@ static inline void cs_put_name(const struct cs_path_info *name)
 			   head.users);
 }
 
+
+static inline void cs_acl_groups_put(struct cs_acl_groups *g)  
+{  
+	if (!g || !atomic_dec_and_test(&g->head.users))  
+		return;  
+	cs_kick_gc();
+}
+
+
 /* For importing variables and functions. */
 extern const struct caitsith_exports caitsith_exports;
 
@@ -1061,6 +1099,7 @@ struct cs_security {
 	struct list_head list;
 	const struct task_struct *task;
 	struct cs_domain_info *cs_domain_info;
+	struct cs_acl_groups *cs_acl_groups;
 	u32 cs_flags;
 	struct rcu_head rcu;
 };

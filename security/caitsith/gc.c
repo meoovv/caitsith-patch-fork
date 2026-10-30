@@ -296,10 +296,11 @@ void cs_del_condition(struct list_head *element)
 		condp++;
 		if (left == CS_ARGV_ENTRY)
 			condp++;
-		else if (left == CS_ENVP_ENTRY) {
+		else if (left == CS_ENVP_ENTRY || cs_cond_is_path_xattr(left)) {
 			cs_put_name(condp->path);
 			condp++;
 		}
+		
 		if (right == CS_IMM_GROUP) {
 			cs_put_group(condp->group);
 			condp++;

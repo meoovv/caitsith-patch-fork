@@ -65,6 +65,9 @@
 #include <uapi/linux/mount.h>
 #endif
 
+// XXX if path xattr support:
+#include <linux/xattr.h>
+
 #ifndef fallthrough
 #define fallthrough do {} while (0)
 #endif
@@ -285,9 +288,19 @@ enum cs_conditions_index {
 #endif
 	CS_ARGV_ENTRY,
 	CS_ENVP_ENTRY,
+	/* we must keep entries XATTR_ in a fixed order for entry comparision to work */
+	CS_XATTR_ENTRY,
+	CS_XATTR_PARENT_ENTRY,
+	CS_XATTR2_ENTRY,
+	CS_XATTR2_PARENT_ENTRY,
 	CS_PATH_ATTRIBUTE_START = 192,
 	CS_PATH_ATTRIBUTE_END = 255
 } __packed;
+
+/* check the first and the last of related entries */
+#define cs_cond_is_path_xattr(c) \
+		((c) >= CS_XATTR_ENTRY && (c) <= CS_XATTR2_PARENT_ENTRY)
+
 
 enum cs_path_attribute_index {
 	CS_PATH_ATTRIBUTE_UID,
@@ -548,6 +561,9 @@ enum cs_value_type {
 
 #define CS_MAX_ACL_GROUPS 60
 #define CS_ACL_GROUPS_INLINE 4
+
+/* Bytes to pre-allocate when matching xattr value */
+#define CS_PATH_XATTR_VALUE_PREALLOC_SIZE 4096
 
 /*
  * TOMOYO checks only SOCK_STREAM, SOCK_DGRAM, SOCK_RAW, SOCK_SEQPACKET.
@@ -905,9 +921,12 @@ void cs_populate_patharg(struct cs_request_info *r, const bool first);
 void cs_transition_failed(const char *domainname);
 void cs_warn_oom(const char *function);
 
+//XXX
 void cs_clear_request_info(struct cs_request_info *r);
 void cs_kick_gc(void);
 bool cs_memory_ok(const void *ptr);
+
+
 
 /* Variable definition for internal use. */
 

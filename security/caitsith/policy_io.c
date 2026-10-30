@@ -850,6 +850,7 @@ struct cs_cond_tmp {
 	unsigned long value[2];
 	unsigned long argv;
 	const struct cs_path_info *envp;
+	const struct cs_path_info *path_xattr;
 };
 
 /***** SECTION3: Prototype definition section *****/
@@ -1814,6 +1815,98 @@ static enum cs_conditions_index cs_parse_ipaddr(char *address,
 
 #endif
 
+
+
+struct cs_xattr_prefix {
+	const char *prefix;
+	enum cs_conditions_index self_idx;
+	enum cs_conditions_index parent_idx;
+	u64 available_self;
+	u64 available_parent;
+};
+
+
+/* 
+	source.xattr[] is only useful for device-backed mounts(will always match as 
+	undefined for tmpfs, procfs, etc.), bind mounts and move mounts.
+*/
+static const struct cs_xattr_prefix cs_xattr_prefixes[] = {  
+	{ "path.",     CS_XATTR_ENTRY,  CS_XATTR_PARENT_ENTRY,  CS_PATH_SELF_OK, CS_PATH_PARENT_OK },  
+	{ "exec.",     CS_XATTR2_ENTRY,  CS_XATTR2_PARENT_ENTRY,  CS_EXECUTE_OR_ENVIRON_OK, CS_EXECUTE_OR_ENVIRON_OK },  
+	{ "old_path.", CS_XATTR_ENTRY,  CS_XATTR_PARENT_ENTRY,  CS_RENAME_OR_LINK_OK, CS_RENAME_OR_LINK_OK },  
+	{ "new_path.", CS_XATTR2_ENTRY, CS_XATTR2_PARENT_ENTRY, F(CS_MAC_RENAME), CS_RENAME_OR_LINK_OK },  
+	{ "source.",   CS_XATTR_ENTRY,  CS_XATTR_PARENT_ENTRY,  F(CS_MAC_MOUNT), F(CS_MAC_MOUNT) },  
+	{ "target.",   CS_XATTR2_ENTRY,  CS_XATTR2_PARENT_ENTRY,  F(CS_MAC_MOUNT), F(CS_MAC_MOUNT) },  
+	{ "new_root.", CS_XATTR_ENTRY, CS_XATTR_PARENT_ENTRY, F(CS_MAC_PIVOT_ROOT), F(CS_MAC_PIVOT_ROOT) },  
+	{ "put_old.",  CS_XATTR2_ENTRY,  CS_XATTR2_PARENT_ENTRY,  F(CS_MAC_PIVOT_ROOT), F(CS_MAC_PIVOT_ROOT) },  
+};  
+
+
+static enum cs_conditions_index cs_parse_lefthand_try_xattr(char *word, const enum cs_mac_index mac, struct cs_cond_tmp *tmp){
+	// XXX should we change all ARRAY_SIZE() interations to unsigned ?
+	unsigned int i;
+
+	for (i=0; i < ARRAY_SIZE(cs_xattr_prefixes); i++){
+		const struct cs_xattr_prefix *p = &cs_xattr_prefixes[i];
+		const size_t p_len = strlen(p->prefix);
+		bool is_parent = false;
+		char *rest;
+
+		if (strncmp(word, p->prefix, p_len)) continue;
+
+		rest = word + p_len;
+		if (!strncmp(rest, "parent.xattr[\"", 14)){
+			rest += 14;
+			is_parent = true;
+		} else if (!strncmp(rest, "xattr[\"", 7)){
+			rest += 7;
+		} else continue;
+		
+		const u64 avail = is_parent ? p->available_parent : p->available_self;
+		if (!(avail & F(mac))) 
+			break;
+			
+		const size_t rest_l = strlen(rest);
+		if (rest_l <= 2)
+			break;
+
+		const size_t name_l = rest_l - 2;
+		if (strcmp(rest + name_l, "\"]")) break;
+		if (name_l > XATTR_NAME_MAX) break;
+		
+		// XXX we probably should restore characters cut to *word
+		rest[name_l] = '\0';
+		tmp->path_xattr = cs_get_name(rest);
+		if (!tmp->path_xattr) 
+			break;
+		tmp->type = CS_TYPE_STRING;
+
+		
+		return is_parent ? p->parent_idx : p->self_idx;
+	}
+	return CS_INVALID_CONDITION;
+}
+
+
+static const char *cs_xattr_get_prefix(const enum cs_mac_index mac, const enum cs_conditions_index idx){
+	unsigned int i;
+	const bool is_parent = (idx == CS_XATTR_PARENT_ENTRY ||
+							idx == CS_XATTR2_PARENT_ENTRY);
+	
+	for (i=0; i<ARRAY_SIZE(cs_xattr_prefixes); i++){
+		const struct cs_xattr_prefix *p = &cs_xattr_prefixes[i];
+		const u64 avail = is_parent	? p->available_parent 
+									: p->available_self;
+
+		if (!(avail & F(mac))) 
+			continue;
+		if (p->self_idx == idx || p->parent_idx == idx)
+			return p->prefix;
+	}
+
+	return "unknown"; /* This should not happen. */
+}
+
 /**
  * cs_parse_lefthand - Parse special lefthand conditions.
  *
@@ -1826,6 +1919,7 @@ static enum cs_conditions_index cs_parse_ipaddr(char *address,
 static enum cs_conditions_index cs_parse_lefthand
 (char *word, const enum cs_mac_index mac, struct cs_cond_tmp *tmp)
 {
+
 	if (mac == CS_MAC_EXECUTE || mac == CS_MAC_ENVIRON) {
 		tmp->type = CS_TYPE_STRING;
 		if (!strncmp(word, "argv[", 5)) {
@@ -1844,6 +1938,10 @@ static enum cs_conditions_index cs_parse_lefthand
 			}
 		}
 	}
+	enum cs_conditions_index idx = cs_parse_lefthand_try_xattr(word, mac, tmp);
+	if (idx != CS_INVALID_CONDITION) return idx;
+
+	
 	return CS_INVALID_CONDITION;
 }
 
@@ -2087,6 +2185,9 @@ static struct cs_condition *cs_get_condition(struct cs_io_buffer *head)
 		} else if (tmp.left == CS_ENVP_ENTRY) {
 			condp->path = tmp.envp;
 			condp++;
+		} else if (cs_cond_is_path_xattr(tmp.left)){
+			condp->path = tmp.path_xattr;
+			condp++;
 		}
 		if (tmp.right == CS_IMM_GROUP) {
 			condp->group = tmp.group;
@@ -2137,6 +2238,7 @@ out:
 		tmp.path ? tmp.path->name : "",
 		tmp.group ? tmp.group->group_name->name : "");
 	cs_put_name(tmp.envp);
+	cs_put_name(tmp.path_xattr);
 	if (tmp.path != &cs_null_name)
 		cs_put_name(tmp.path);
 	cs_put_group(tmp.group);
@@ -2546,6 +2648,18 @@ static bool cs_print_condition_loop(struct cs_io_buffer *head,
 		case CS_ARGV_ENTRY:
 			cs_io_printf(head, "argv[%lu]", condp->value);
 			condp++;
+			break;
+		case CS_XATTR_ENTRY:  
+		case CS_XATTR_PARENT_ENTRY:  
+		case CS_XATTR2_ENTRY:  
+		case CS_XATTR2_PARENT_ENTRY:  
+			cs_set_string(head, cs_xattr_get_prefix(type, left));  
+			if (left == CS_XATTR_PARENT_ENTRY || left == CS_XATTR2_PARENT_ENTRY)  
+				cs_set_string(head, "parent.");  
+			cs_set_string(head, "xattr[\"");  
+			cs_set_string(head, condp->path->name);  
+			condp++;  
+			cs_set_string(head, "\"]");  
 			break;
 		case CS_ENVP_ENTRY:
 			cs_set_string(head, "envp[\"");

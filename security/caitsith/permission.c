@@ -3404,6 +3404,76 @@ void cs_get_attributes(struct cs_request_info *r)
 	r->obj.validate_done = true;
 }
 
+
+static bool cs_check_path_xattr(struct cs_request_info *r, const u8 slot,
+			  const struct cs_path_info *name,
+			  const struct cs_group *group,
+			  const struct cs_path_info *value,
+			  const bool match) 
+{
+	const struct path *path = &r->obj.path[slot >> 1];
+	struct dentry *dentry = path->dentry;
+	struct inode *inode;
+	struct cs_path_info xval;
+	ssize_t len;
+	/* must be initialized so we can free it safely */
+	char *buf = NULL;
+	bool found = false;
+	bool fail = false;
+
+	if (!dentry) goto out;
+	if (slot & 1) dentry = dget_parent(dentry);
+	inode = d_backing_inode(dentry);
+	if (!inode) goto dput;
+
+	/* 
+		Try medium-sized pre-allocated buffer and allocate required size 
+		if value wont fit, so we're doing 1 syscall instead of 2 in most cases.
+		kzalloc is used for medium buffer and kvzalloc is used when we need larger 
+	*/
+	buf = kzalloc(CS_PATH_XATTR_VALUE_PREALLOC_SIZE + 1, GFP_NOFS);
+	if (!buf) goto oom;
+
+	len = __vfs_getxattr(dentry, inode, name->name, buf, CS_PATH_XATTR_VALUE_PREALLOC_SIZE);
+	if (unlikely(len == -ERANGE)) {
+		const ssize_t size = __vfs_getxattr(dentry, inode, name->name, NULL, 0);
+		if (size < 0) goto free;
+		// safe: buf is kzalloc'd at this point
+		kfree(buf);
+
+		// safe: SSIZE_MAX is larger then XATTR_SIZE_MAX(checked by FS handler) 
+		buf = kvzalloc(size + 1, GFP_NOFS);
+		if (!buf) goto oom;
+
+		len = __vfs_getxattr(dentry, inode, name->name, buf, size);
+	}
+	if (len<0) goto free;
+	buf[len] = '\0';
+
+	found = true;
+	xval.name = buf;
+	cs_fill_path_info(&xval);
+	if (!cs_path_matches_group_or_pattern(&xval, group, value, match))
+		fail = true;	
+
+free:
+	/* kvfree() is fine for both kvzalloc() and kzalloc() */
+	kvfree(buf);
+dput:
+	if (slot & 1) dput(dentry);
+out:
+	if (fail) return false;
+
+	// (almost, we always fail on oom) mirrors cs_check_envp()'s truth table
+	return value == &cs_null_name ? found != match : found || !match;
+oom:
+	r->failed_by_oom = true;
+	fail = true;
+	goto dput; 
+	
+}
+
+
 /**
  * cs_populate_patharg - Calculate pathname for permission check and audit logs.
  *
@@ -3580,6 +3650,11 @@ not_single_value:
 		break;
 	case CS_ENVP_ENTRY:
 	case CS_IMM_NAME_ENTRY:
+	// XXX: should we gate xattr matching with Kconfig option?
+	case CS_XATTR_ENTRY:
+	case CS_XATTR2_ENTRY:
+	case CS_XATTR_PARENT_ENTRY:
+	case CS_XATTR2_PARENT_ENTRY:
 		arg->name = (*condp)->path;
 		(*condp)++;
 		break;
@@ -3822,9 +3897,15 @@ static bool cs_condition(struct cs_request_info *r,
 				    (r, left.name, right.group, right.name,
 				     match))
 					continue;
+			} else if (cs_cond_is_path_xattr(left_op)) {
+					// arithmetics require XATTR_ entries to be declared in a parent-by-child and 1-by-2 order
+					if (cs_check_path_xattr(r, left_op - CS_XATTR_ENTRY, left.name, right.group, right.name, match))
+						continue;
 			} else if (cs_path_matches_group_or_pattern
-				   (left.name, right.group, right.name, match))
+				(left.name, right.group, right.name, match))
 				continue;
+
+				
 			return false;
 		}
 		if (left.type != CS_ARG_TYPE_NONE)

@@ -4580,53 +4580,81 @@ static ssize_t cs_write(struct file *file, const char __user *buf,
 			size_t count, loff_t *ppos)
 {
 	struct cs_io_buffer *head = file->private_data;
-	int error = count;
-	char *cp0;
+	ssize_t out = count;
+	char *data, *pos, *end;
 	int idx;
 
 	if (mutex_lock_killable(&head->io_sem))
 		return -EINTR;
-	cp0 = head->write_buf;
+
+	data = memdup_user(buf, count);
+	if (IS_ERR(data)) {
+		out = PTR_ERR(data);
+		goto out_sem;
+	}
+	
 	head->read_user_buf_avail = 0;
 	idx = cs_read_lock();
-	/* Read a line and dispatch it to the policy handler. */
-	while (count) {
-		char c;
 
-		if (head->w.avail >= head->writebuf_size - 1) {
-			const int len = head->writebuf_size * 2;
-			char *cp = kzalloc(len, GFP_NOFS);
+	/* Don't allow updating policies by non manager programs. */
+	if (head->type != CS_PROCESS_STATUS && !cs_manager()) {
+		out = -EPERM;
+		goto out;
+	}
 
-			if (!cp) {
-				error = -ENOMEM;
-				break;
+	pos = data;
+	end = data + count;
+	while (pos < end) {
+		char *next_line = memchr(pos, '\n', end - pos);
+		size_t len = next_line ? (size_t)(next_line - pos) : 
+								 (size_t)(end - pos);
+		char *line;
+
+		if (likely(!head->w.avail && next_line)) {
+			/* Fast path: recieved complete line */
+			*next_line = '\0';
+			line = pos;
+		} else {
+			/* Slow path: recieved incomplete line */
+
+			/* fragment is being added to the previous write */
+			if (head->w.avail + len >= head->writebuf_size) {
+				/*  
+					Check if fragment fits and perform buffer geometric growth 
+					if not, ensuring we're not doing too much reallocations.
+					1 more byte for NULL-termination is added here, thanks 
+					to >= condtion 
+				*/
+				size_t new_size = head->writebuf_size * 2;
+				char *buf_copy;
+
+				while (head->w.avail + len >= new_size)
+					new_size *= 2;
+				buf_copy = kzalloc(new_size, GFP_NOFS);
+				if (!buf_copy) {
+					out = -ENOMEM;
+					goto out;
+				}
+				memmove(buf_copy, head->write_buf, head->w.avail);
+				kfree(head->write_buf);
+				head->write_buf = buf_copy;
+				head->writebuf_size = new_size;
 			}
-			memmove(cp, cp0, head->w.avail);
-			kfree(cp0);
-			head->write_buf = cp;
-			cp0 = cp;
-			head->writebuf_size = len;
+			
+			memmove(head->write_buf + head->w.avail, pos, len);
+			head->w.avail += len;
+			/* line is over */
+			if (!next_line) break;
+
+			head->write_buf[head->w.avail] = '\0';
+			head->w.avail = 0;
+			line = head->write_buf;
 		}
-		if (get_user(c, buf)) {
-			error = -EFAULT;
-			break;
-		}
-		buf++;
-		count--;
-		cp0[head->w.avail++] = c;
-		if (c != '\n')
-			continue;
-		cp0[head->w.avail - 1] = '\0';
-		head->w.avail = 0;
-		cs_normalize_line(cp0);
-		/* Don't allow updating policies by non manager programs. */
-		if (head->type != CS_PROCESS_STATUS && !cs_manager()) {
-			error = -EPERM;
-			goto out;
-		}
-		switch (cs_parse_policy(head, cp0)) {
-		case -EPERM:
-			error = -EPERM;
+
+		cs_normalize_line(line);
+		switch (cs_parse_policy(head, line)) {
+		case -EPERM: 
+			out = -EPERM;
 			goto out;
 		case 0:
 			/* Update statistics. */
@@ -4634,11 +4662,16 @@ static ssize_t cs_write(struct file *file, const char __user *buf,
 				cs_update_stat(CS_STAT_POLICY_UPDATES);
 			break;
 		}
+		pos = next_line + 1;
 	}
+
+
 out:
 	cs_read_unlock(idx);
+	kfree(data);
+out_sem:
 	mutex_unlock(&head->io_sem);
-	return error;
+	return out;
 }
 
 /**

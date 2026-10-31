@@ -1843,7 +1843,6 @@ static const struct cs_xattr_prefix cs_xattr_prefixes[] = {
 
 
 static enum cs_conditions_index cs_parse_lefthand_try_xattr(char *word, const enum cs_mac_index mac, struct cs_cond_tmp *tmp){
-	// XXX should we change all ARRAY_SIZE() interations to unsigned ?
 	unsigned int i;
 
 	for (i=0; i < ARRAY_SIZE(cs_xattr_prefixes); i++){
@@ -2037,7 +2036,7 @@ static enum cs_conditions_index cs_condindex(const char *word,
 					     struct cs_cond_tmp *tmp,
 					     const bool lefthand)
 {
-	int i;
+	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(cs_conditions); i++) {
 		if (!(cs_conditions[i].available & F(mac)) ||
@@ -2607,7 +2606,7 @@ static void cs_print_number(struct cs_io_buffer *head,
 static const char *cs_condword(const enum cs_mac_index type,
 			       const enum cs_conditions_index cond)
 {
-	int i;
+	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(cs_conditions); i++) {
 		if (!(cs_conditions[i].available & F(type)) ||

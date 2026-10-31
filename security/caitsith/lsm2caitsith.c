@@ -307,7 +307,7 @@ static struct security_hook_list caitsith_hooks[] = {
 static int __init cs_add_hooks(void)
 {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
-	int i;
+	unsigned int i;
 #endif
 	if (caitsith_ops.disabled)
 		return 0;

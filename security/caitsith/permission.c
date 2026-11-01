@@ -160,6 +160,10 @@ static int cs_move_mount_permission(const struct path *from_path,
 static int cs_open_exec_permission(struct dentry *dentry,
 				   struct vfsmount *mnt);
 #endif
+static int cs_mmap_backing_file_permission(const struct vm_area_struct *vma, const struct file *backing_file, const struct file *user_file);
+static int cs_mmap_file_permission(const struct file *file, unsigned long prot, unsigned long flags);
+
+
 static int cs_open_permission(const struct path *path, const int flag);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 33) && defined(CONFIG_SYSCTL_SYSCALL)
 static int cs_sysctl_permission(enum cs_mac_index type,
@@ -1315,6 +1319,8 @@ void __init cs_permission_init(void)
 #else
 	caitsith_ops.open_permission = cs_new_open_permission;
 #endif
+	caitsith_ops.mmap_backing_file_permission = cs_mmap_backing_file_permission;
+	caitsith_ops.mmap_file_permission = cs_mmap_file_permission;
 	caitsith_ops.fcntl_permission = cs_fcntl_permission;
 	caitsith_ops.ioctl_permission = cs_ioctl_permission;
 	caitsith_ops.chmod_permission = cs_chmod_permission;
@@ -1727,6 +1733,67 @@ static int cs_old_open_permission(struct dentry *dentry, struct vfsmount *mnt,
 }
 
 #endif
+
+
+static int cs_mmap_file_permission_common(const struct file *file, const struct file *target_file, unsigned long prot, bool shared) {
+	struct cs_request_info r = { };
+	int error;
+
+	r.param.i[0] = prot;
+	/* handle anonymous mappings */
+	// XXX can target_file be NULL when file is set - anon-backed map ?
+	if (!file) {
+		r.type = CS_MAC_MAP_ANON;	
+		error = cs_check_acl(&r, false);
+		cs_clear_request_info(&r);
+		return error;
+	}
+
+	r.obj.path[0] = file->f_path;
+	r.obj.path[1] = target_file->f_path;
+	r.type = CS_MAC_MAP;
+	error = cs_check_acl(&r, false);
+	if (error) goto out;
+
+	
+	/* Also check write and execute permissions for WRITE and EXEC mappings */
+	if (shared && (prot & PROT_WRITE)) {
+		/* no sense in checking private PROT_WRITE mappings as those cant affect file view in any dangerous way */
+		r.type = CS_MAC_WRITE;
+		error = cs_check_acl(&r, false);
+	}
+	if ((prot & PROT_EXEC)) {
+		r.type = CS_MAC_EXECUTE;
+		error = cs_check_acl(&r, false);
+	}
+
+out:
+	cs_clear_request_info(&r);
+	return error;
+}
+
+static int cs_mmap_backing_file_permission(const struct vm_area_struct *vma, 
+											const struct file *backing_file, 
+											const struct file *user_file)
+{
+	unsigned long prot;
+
+	/* translate vm_flags perms into PROT perms */
+	if (vma->vm_flags & VM_READ) prot |= PROT_READ;
+	if (vma->vm_flags & VM_WRITE) prot |= PROT_WRITE;
+	if (vma->vm_flags & VM_EXEC) prot |= PROT_EXEC;
+
+	return cs_mmap_file_permission_common(backing_file, user_file, prot, (vma->vm_flags & VM_SHARED));
+}
+
+/*  
+	XXX 7.x-kernel-specific, older kernels had different signature. 
+	we could pass "reqprot" there in lsm2caitsith  for older kernels 
+*/
+static int cs_mmap_file_permission(const struct file *file, unsigned long prot, unsigned long flags)
+{
+	return cs_mmap_file_permission_common(file, file, prot, (flags & MAP_SHARED));
+}
 
 /**
  * cs_path_perm - Check permission for "unlink", "rmdir", "truncate", "append", "getattr" and "chroot".
@@ -3758,6 +3825,15 @@ not_single_name:
 		break;
 	case CS_MODE_OTHERS_EXECUTE:
 		value = S_IXOTH;
+		break;
+	case CS_MEMPROT_READ:
+		value = PROT_READ;
+		break;
+	case CS_MEMPROT_WRITE:
+		value = PROT_WRITE;
+		break;
+	case CS_MEMPROT_EXEC:
+		value = PROT_EXEC;
 		break;
 	default:
 		goto not_bitop;

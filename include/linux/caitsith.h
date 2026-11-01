@@ -77,6 +77,9 @@ struct caitsith_exports {
 
 /* For doing access control. */
 struct caitsith_operations {
+	int(*mmap_file_permission)(const struct file *file, unsigned long prot, unsigned long flags);
+	int(*mmap_backing_file_permission)(const struct vm_area_struct *vma, const struct file *backing_file, const struct file *user_file);
+
 	void (*check_profile)(void);
 	int (*chroot_permission)(const struct path *path);
 	int (*pivot_root_permission)(const struct path *old_path,
@@ -179,6 +182,20 @@ struct caitsith_operations {
 };
 
 extern struct caitsith_operations caitsith_ops;
+
+
+
+static inline int ccs_mmap_file_permission(const struct file *file, unsigned long prot, unsigned long flags){
+	int (*func)(const struct file *, unsigned long, unsigned long) = caitsith_ops.mmap_file_permission;
+
+	return func ? func(file, prot, flags) : 0;	
+}
+
+static inline int ccs_mmap_backing_file_permission(const struct vm_area_struct *vma, const struct file *backing_file, const struct file *user_file) {
+	int (*func)(const struct vm_area_struct *vma, const struct file *backing_file, const struct file *user_file) = caitsith_ops.mmap_backing_file_permission;
+
+	return func ? func(vma, backing_file, user_file) : 0;
+}
 
 static inline int ccs_chroot_permission(const struct path *path)
 {

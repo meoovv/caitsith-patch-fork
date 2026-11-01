@@ -68,6 +68,9 @@
 // XXX if path xattr support:
 #include <linux/xattr.h>
 
+#include <linux/mman.h>
+
+
 #ifndef fallthrough
 #define fallthrough do {} while (0)
 #endif
@@ -261,6 +264,9 @@ enum cs_conditions_index {
 	CS_MODE_OTHERS_READ,     /* S_IROTH */
 	CS_MODE_OTHERS_WRITE,    /* S_IWOTH */
 	CS_MODE_OTHERS_EXECUTE,  /* S_IXOTH */
+	CS_MEMPROT_READ,
+	CS_MEMPROT_WRITE,
+	CS_MEMPROT_EXEC,
 	CS_TASK_EXECUTE_HANDLER, /* CS_TASK_IS_EXECUTE_HANDLER */
 	CS_HANDLER_PATH,
 	CS_ACL_GROUP,
@@ -330,6 +336,8 @@ enum cs_group_id {
 enum cs_mac_index {
 	CS_MAC_EXECUTE,
 	CS_MAC_READ,
+	CS_MAC_MAP,
+	CS_MAC_MAP_ANON,
 	CS_MAC_WRITE,
 	CS_MAC_APPEND,
 	CS_MAC_CREATE,

@@ -23,6 +23,8 @@
 static const char * const cs_mac_keywords[CS_MAX_MAC_INDEX] = {
 	[CS_MAC_EXECUTE]    = "execute",
 	[CS_MAC_READ]       = "read",
+	[CS_MAC_MAP]       = "map",
+	[CS_MAC_MAP_ANON]       = "map_anon",
 	[CS_MAC_WRITE]      = "write",
 	[CS_MAC_APPEND]     = "append",
 	[CS_MAC_CREATE]     = "create",
@@ -127,6 +129,8 @@ static const char * const cs_memory_headers[CS_MAX_MEMORY_STAT] = {
 #define CS_ALL_OK				\
 	(F(CS_MAC_EXECUTE) |			\
 	 F(CS_MAC_READ) |			\
+	 F(CS_MAC_MAP) |			\
+	 F(CS_MAC_MAP_ANON) |			\
 	 F(CS_MAC_WRITE) |			\
 	 F(CS_MAC_APPEND) |			\
 	 F(CS_MAC_CREATE) |			\
@@ -190,6 +194,7 @@ static const char * const cs_memory_headers[CS_MAX_MEMORY_STAT] = {
 #define CS_PATH_SELF_OK				\
 	(F(CS_MAC_EXECUTE) |			\
 	 F(CS_MAC_READ) |			\
+	 F(CS_MAC_MAP) |			\
 	 F(CS_MAC_WRITE) |			\
 	 F(CS_MAC_APPEND) |			\
 	 F(CS_MAC_UNLINK) |			\
@@ -281,6 +286,11 @@ static const struct {
 	// TODO: move on
 	{ "acl_group", CS_TYPE_ASSIGN, CS_TYPE_INVALID, CS_ACL_GROUP, F(CS_MAC_EXECUTE) },
 	{ "task.acl_group", CS_TYPE_STRING, CS_TYPE_STRING, CS_SELF_ACL_GROUP, CS_ALL_OK },
+	// TODO: move on
+	{ "prot", CS_TYPE_FILEPERM, CS_TYPE_FILEPERM, CS_COND_NARG0, F(CS_MAC_MAP) | F(CS_MAC_MAP_ANON) },
+	{ "prot_read", CS_TYPE_INVALID, CS_TYPE_FILEPERM, CS_MEMPROT_READ, CS_ALL_OK },
+	{ "prot_write", CS_TYPE_INVALID, CS_TYPE_FILEPERM, CS_MEMPROT_WRITE, CS_ALL_OK },
+	{ "prot_exec", CS_TYPE_INVALID, CS_TYPE_FILEPERM, CS_MEMPROT_EXEC, CS_ALL_OK },
 	{ "addr",                    CS_TYPE_STRING,   CS_TYPE_STRING,
 	  CS_COND_SARG0,            CS_UNIX_SOCKET_OK },
 	{ "argc",                    CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
@@ -724,7 +734,7 @@ static const struct {
 	{ "symlink",                 CS_TYPE_INVALID,  CS_TYPE_FILETYPE,
 	  CS_OBJ_IS_SYMLINK,        CS_ALL_OK },
 	{ "target",                  CS_TYPE_STRING,   CS_TYPE_STRING,
-	  CS_COND_SARG1,            F(CS_MAC_MOUNT) | F(CS_MAC_SYMLINK) },
+	  CS_COND_SARG1,            F(CS_MAC_MOUNT) | F(CS_MAC_SYMLINK) | F(CS_MAC_MAP) },
 	{ "target.dev_major",        CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_DEV_MAJOR,
 	  F(CS_MAC_MOUNT) },
@@ -3787,6 +3797,12 @@ static int cs_print_param(struct cs_request_info *r, char *buf, int len)
 	case CS_MAC_EXECUTE:
 		return snprintf(buf, len, " exec=\"%s\" path=\"%s\"",
 				r->param.s[1]->name, r->param.s[0]->name);
+	case CS_MAC_MAP:
+		return snprintf(buf, len, " path=\"%s\" target=\"%s\" prot=%lx",
+				r->param.s[0]->name, r->param.s[1]->name, r->param.i[0]);
+	case CS_MAC_MAP_ANON:
+		return snprintf(buf, len, " prot=%lx",
+				r->param.i[0]);
 	case CS_MAC_READ:
 	case CS_MAC_WRITE:
 	case CS_MAC_APPEND:

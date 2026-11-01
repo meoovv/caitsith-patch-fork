@@ -11,6 +11,23 @@
 #include <linux/caitsith.h>
 #include "check_security_file_ioctl_compat.h"
 
+int ccs_mmap_file(const struct file *file, unsigned long prot, unsigned long flags) {
+	return ccs_mmap_file_permission(file, prot, flags);
+}
+
+int ccs_mmap_backing_file(const struct vm_area_struct *vma, const struct file *backing_file, const struct file *user_file) {
+	return ccs_mmap_backing_file_permission(vma, backing_file, user_file);
+}
+
+/*int ccs_file_mprotect(struct vm_area_struct *vma, unsigned long reqprot, unsigned long prot) {
+	return ccs_mprotect_permission(vma, reqprot, prot);
+}
+
+int ccs_mmap_addr(unsigned long addr) {
+	return ccs_mmap_addr_permission(addr);
+}*/
+
+
 int ccs_sb_umount(struct vfsmount *mnt, int flags)
 {
 	return ccs_umount_permission(mnt, flags);
@@ -265,6 +282,10 @@ EXPORT_SYMBOL(ccs_path_rename);
 #include <linux/lsm_hooks.h>
 
 static struct security_hook_list caitsith_hooks[] = {
+	//LSM_HOOK_INIT(file_mprotect, ccs_file_mprotect),
+	LSM_HOOK_INIT(mmap_file, ccs_mmap_file),
+	LSM_HOOK_INIT(mmap_backing_file, ccs_mmap_backing_file),
+	//LSM_HOOK_INIT(mmap_addr, ccs_mmap_addr),
 	LSM_HOOK_INIT(settime, ccs_settime),
 	LSM_HOOK_INIT(sb_mount, ccs_sb_mount),
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0)

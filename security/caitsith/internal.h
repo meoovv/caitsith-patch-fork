@@ -68,6 +68,10 @@
 // XXX if path xattr support:
 #include <linux/xattr.h>
 
+#include <linux/mman.h>
+#include <linux/fs.h>
+
+
 #ifndef fallthrough
 #define fallthrough do {} while (0)
 #endif
@@ -261,6 +265,13 @@ enum cs_conditions_index {
 	CS_MODE_OTHERS_READ,     /* S_IROTH */
 	CS_MODE_OTHERS_WRITE,    /* S_IWOTH */
 	CS_MODE_OTHERS_EXECUTE,  /* S_IXOTH */
+	CS_MEMPROT_READ,
+	CS_MEMPROT_WRITE,
+	CS_MEMPROT_EXEC,
+	CS_MEMTARG_STACK,
+	CS_MEMTARG_HEAP,
+	CS_MEMTARG_OTHER,
+	CS_MEMTARG_OTHER_COW,
 	CS_TASK_EXECUTE_HANDLER, /* CS_TASK_IS_EXECUTE_HANDLER */
 	CS_HANDLER_PATH,
 	CS_ACL_GROUP,
@@ -330,6 +341,8 @@ enum cs_group_id {
 enum cs_mac_index {
 	CS_MAC_EXECUTE,
 	CS_MAC_READ,
+	CS_MAC_MAP,
+	CS_MAC_MAP_ANON,
 	CS_MAC_WRITE,
 	CS_MAC_APPEND,
 	CS_MAC_CREATE,
@@ -540,6 +553,17 @@ enum cs_special_mount {
 	CS_MOUNT_MAKE_SHARED,     /* mount --make-shared /dir     */
 	CS_MAX_SPECIAL_MOUNT
 } __packed;
+
+/* XXX is __packed useful for enums ? */
+enum cs_memory_targets {
+	CS_MEMORY_NONE = 0,
+	CS_MEMORY_STACK,
+	CS_MEMORY_HEAP,
+	CS_MEMORY_OTHER,
+	CS_MEMORY_OTHER_COW,
+	CS_MAX_MEMORY_TARGET
+} __packed;
+
 
 /* Index numbers for type of numeric values. */
 enum cs_value_type {

@@ -42,6 +42,7 @@ static const char * const cs_mounts[CS_MAX_SPECIAL_MOUNT] = {
 	[CS_MOUNT_MAKE_SHARED]     = "--make-shared",
 };
 
+
 #ifdef CONFIG_CAITSITH_CAPABILITY
 
 /*
@@ -160,6 +161,12 @@ static int cs_move_mount_permission(const struct path *from_path,
 static int cs_open_exec_permission(struct dentry *dentry,
 				   struct vfsmount *mnt);
 #endif
+
+// FIXME: build will fail for 6 kernels bc LSM_HOOKS_INIT type mismatch, should we remove consts ?
+static int cs_mmap_backing_file_permission(const struct vm_area_struct *vma, const struct file *backing_file, const struct file *user_file);
+static int cs_mmap_file_permission(const struct file *file, unsigned long prot, unsigned long flags);
+static int cs_file_mprotect_permission(const struct vm_area_struct *vma, const unsigned long reqprot __always_unused, const unsigned long prot);
+
 static int cs_open_permission(const struct path *path, const int flag);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 33) && defined(CONFIG_SYSCTL_SYSCALL)
 static int cs_sysctl_permission(enum cs_mac_index type,
@@ -1315,6 +1322,9 @@ void __init cs_permission_init(void)
 #else
 	caitsith_ops.open_permission = cs_new_open_permission;
 #endif
+	caitsith_ops.mmap_backing_file_permission = cs_mmap_backing_file_permission;
+	caitsith_ops.mmap_file_permission = cs_mmap_file_permission;
+	caitsith_ops.file_mprotect_permission = cs_file_mprotect_permission;
 	caitsith_ops.fcntl_permission = cs_fcntl_permission;
 	caitsith_ops.ioctl_permission = cs_ioctl_permission;
 	caitsith_ops.chmod_permission = cs_chmod_permission;
@@ -1727,6 +1737,164 @@ static int cs_old_open_permission(struct dentry *dentry, struct vfsmount *mnt,
 }
 
 #endif
+
+
+static inline int cs_mmap_file_shared_acl(const struct path path, const unsigned long prot, const bool mprotect)
+{
+	int error = 0;
+	struct cs_request_info r = { };
+	//TODO: hint that actiom is triggered by mmap/mprotect
+
+	r.obj.path[0] = path;
+
+	/* CS_MAC_READ check is redundant for mprotect() */
+	if (!mprotect && (prot & PROT_READ)) {
+		r.type = CS_MAC_READ;
+		error = cs_check_acl(&r, false);
+	} 
+	if (!error && (prot & PROT_WRITE)) {
+		r.type = CS_MAC_WRITE;
+		error = cs_check_acl(&r, false);		
+	}
+	if (!error && (prot & PROT_EXEC)) {
+		r.type = CS_MAC_EXECUTE;
+		error = cs_check_acl(&r, false);
+	}
+	
+	cs_clear_request_info(&r);
+	return error;
+} 
+
+// TODO docs
+static int cs_mmap_acl(const struct file *file, 
+						const struct path *user_file_path,
+						const bool mprotect,
+						const bool shared,
+						const unsigned long prot,
+						const enum cs_memory_targets vma_target)
+{
+	int error = 0;
+	struct cs_request_info r = { };
+
+	cs_check_auto_domain_transition();
+
+	r.param.i[0] = mprotect;
+	r.param.i[1] = prot;
+	// XXX i[] params are always zero-initialized (=0 matches), we cant yet make matching impossible.	
+	r.param.i[2] = vma_target; 
+
+	/* Anonymous mmap/mprotect */
+	if (!file) {
+		r.type = CS_MAC_MAP_ANON;
+		goto check;
+	}
+
+	const bool overlaying = (user_file_path != NULL);
+
+	const struct path user_path = overlaying ? *user_file_path : file->f_path;
+	const struct path backing_path = file->f_path;
+	/* 
+		Put user and backing files to path[] slots for private mmap/mprotect,
+		those are always equal on non-overlay filesystems.
+	*/
+	r.type = CS_MAC_MAP;
+	r.obj.path[0] = user_path;
+	r.obj.path[1] = backing_path;
+
+	if (shared) {
+		error = cs_mmap_file_shared_acl(user_path, prot, mprotect);
+		if (!overlaying)
+			return error;
+		error = error ? error : cs_mmap_file_shared_acl(backing_path, prot, mprotect);	
+	}
+
+check:
+	error = error ? error : cs_check_acl(&r, false);
+	cs_clear_request_info(&r);
+	return error;
+}
+
+
+/* vma->vm_file is always mapped to backing_file here */
+static int cs_mmap_backing_file_permission(const struct vm_area_struct *vma, const struct file *backing_file, const struct file *user_file)
+{
+	unsigned long prot = 0;
+
+	// XXX vm_flags can over-report over reqprot. we should remember that we're checking granted prots instead of requested
+	
+	/* translate vm_flags perms into PROT perms */
+	if (vma->vm_flags & VM_READ) prot |= PROT_READ;
+	if (vma->vm_flags & VM_WRITE) prot |= PROT_WRITE;
+	if (vma->vm_flags & VM_EXEC) prot |= PROT_EXEC;
+
+	return cs_mmap_acl(backing_file, &user_file->f_path, false,
+						vma->vm_flags & VM_SHARED,
+						prot, CS_MEMORY_OTHER); 
+}
+
+/*  
+	XXX 7.x-kernel-specific, older kernels had different signature. 
+	we could pass "reqprot" there in lsm2caitsith  for older kernels 
+*/
+static int cs_mmap_file_permission(const struct file *file, unsigned long prot, unsigned long flags)
+{	
+	const unsigned long type = flags & MAP_TYPE;
+
+	// XXX MAP_SHARED_VALIDATE is 4.15+
+	return cs_mmap_acl(file, NULL, false,
+						(type == MAP_SHARED || type == MAP_SHARED_VALIDATE),
+						prot, CS_MEMORY_OTHER);
+}
+
+// TODO: special case for READ_IMPLIES_EXEC systems?
+static int cs_file_mprotect_permission(const struct vm_area_struct *vma, const unsigned long reqprot __always_unused, const unsigned long prot)
+{
+	const bool will_set_exec = (prot & PROT_EXEC) && !(vma->vm_flags & VM_EXEC);
+
+	const struct file *file = vma->vm_file;
+	const struct path *user_file_path = NULL;
+
+	enum cs_memory_targets vma_target = CS_MEMORY_NONE;
+
+
+	/* 
+		Available values for vma_target:
+			file mprotect: CS_MEMORY_OTHER_COW
+			anonymous exec mprotect: CS_MEMORY_STACK, CS_MEMORY_HEAP
+			both: CS_MEMORY_OTHER
+			anonymous non-exec mprotect: none
+	*/
+	if (file) {
+		// XXX FMODE_BACKING is 6.7+
+		user_file_path = (file->f_mode & FMODE_BACKING) ? backing_file_user_path(file) : NULL;
+		
+		if (will_set_exec) {
+			if (vma->anon_vma) vma_target = CS_MEMORY_OTHER_COW;
+			else vma_target = CS_MEMORY_OTHER;
+		}
+	} else {
+		/* Only expose vma_target for anonymous mprotect on +X */
+		if (will_set_exec) {
+			/*	
+				We're not using vm_is_initial_heap() because its broken on no-heap systems. 
+				See security/selinux/hooks.c for details 
+			*/
+			if (vma->vm_start >= vma->vm_mm->start_brk && vma->vm_end <= vma->vm_mm->brk)
+				vma_target = CS_MEMORY_HEAP;
+			// vma_is_* are 6.4+ helpers
+			else if (vma_is_initial_stack(vma) || vma_is_stack_for_current(vma))
+				vma_target = CS_MEMORY_STACK;
+			else
+				vma_target = CS_MEMORY_OTHER;
+		}
+	}
+	
+	return cs_mmap_acl(file, user_file_path, true,
+						vma->vm_flags & VM_SHARED,
+						prot, vma_target);
+}
+
+
 
 /**
  * cs_path_perm - Check permission for "unlink", "rmdir", "truncate", "append", "getattr" and "chroot".
@@ -3556,6 +3724,18 @@ static bool cs_cond2arg(struct cs_cond_arg *arg,
 	case CS_SELF_PPID:
 		value = cs_sys_getppid();
 		break;
+	case CS_MEMTARG_STACK:
+		value = CS_MEMORY_STACK;
+		break;
+	case CS_MEMTARG_HEAP:
+		value = CS_MEMORY_HEAP;
+		break;
+	case CS_MEMTARG_OTHER:
+		value = CS_MEMORY_OTHER;
+		break;
+	case CS_MEMTARG_OTHER_COW:
+		value = CS_MEMORY_OTHER_COW;
+		break;
 	case CS_OBJ_IS_SOCKET:
 		value = S_IFSOCK;
 		break;
@@ -3758,6 +3938,15 @@ not_single_name:
 		break;
 	case CS_MODE_OTHERS_EXECUTE:
 		value = S_IXOTH;
+		break;
+	case CS_MEMPROT_READ:
+		value = PROT_READ;
+		break;
+	case CS_MEMPROT_WRITE:
+		value = PROT_WRITE;
+		break;
+	case CS_MEMPROT_EXEC:
+		value = PROT_EXEC;
 		break;
 	default:
 		goto not_bitop;

@@ -14,6 +14,11 @@
 
 #ifdef CONFIG_CAITSITH
 
+//FIXME per-kernel defenitions ?
+int ccs_mmap_file(const struct file *file, unsigned long prot, unsigned long flags);
+int ccs_mmap_backing_file(const struct vm_area_struct *vma, const struct file *backing_file, const struct file *user_file);
+int ccs_file_mprotect(const struct vm_area_struct *vma, const unsigned long reqprot, const unsigned long prot);
+
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0)
 int ccs_settime(const struct timespec64 *ts, const struct timezone *tz);
 #else
@@ -90,6 +95,19 @@ int ccs_sb_mount(const char *dev_name, struct path *path, const char *type,
 int ccs_sb_pivotroot(struct path *old_path, struct path *new_path);
 #endif
 #else
+
+// FIXME
+static inline int ccs_mmap_file(const struct file *file, unsigned long prot, unsigned long flags) {
+	return 0;
+}
+
+static inline int ccs_mmap_backing_file(const struct vm_area_struct *vma, const struct file *backing_file, const struct file *user_file) {
+	return 0;
+}
+
+static inline int ccs_file_mprotect(const struct vm_area_struct *vma, const unsigned long reqprot, const unsigned long prot) {
+	return 0;
+}
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0)
 static inline int ccs_settime(const struct timespec64 *ts,

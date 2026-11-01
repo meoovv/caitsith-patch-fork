@@ -19,10 +19,20 @@
 #define dprintk(...) do { } while (0)
 #endif
 
+static const char * const cs_memory_target2name[CS_MAX_MEMORY_TARGET] = {
+	[CS_MEMORY_NONE] = "0",
+	[CS_MEMORY_STACK] = "mem_stack",
+	[CS_MEMORY_HEAP] = "mem_heap",
+	[CS_MEMORY_OTHER] = "mem",	
+	[CS_MEMORY_OTHER_COW] = "mem_cow",	
+};
+
 /* String table for operation. */
 static const char * const cs_mac_keywords[CS_MAX_MAC_INDEX] = {
 	[CS_MAC_EXECUTE]    = "execute",
 	[CS_MAC_READ]       = "read",
+	[CS_MAC_MAP]       = "map",
+	[CS_MAC_MAP_ANON]       = "map_anon",
 	[CS_MAC_WRITE]      = "write",
 	[CS_MAC_APPEND]     = "append",
 	[CS_MAC_CREATE]     = "create",
@@ -127,6 +137,8 @@ static const char * const cs_memory_headers[CS_MAX_MEMORY_STAT] = {
 #define CS_ALL_OK				\
 	(F(CS_MAC_EXECUTE) |			\
 	 F(CS_MAC_READ) |			\
+	 F(CS_MAC_MAP) |			\
+	 F(CS_MAC_MAP_ANON) |			\
 	 F(CS_MAC_WRITE) |			\
 	 F(CS_MAC_APPEND) |			\
 	 F(CS_MAC_CREATE) |			\
@@ -190,6 +202,7 @@ static const char * const cs_memory_headers[CS_MAX_MEMORY_STAT] = {
 #define CS_PATH_SELF_OK				\
 	(F(CS_MAC_EXECUTE) |			\
 	 F(CS_MAC_READ) |			\
+	 F(CS_MAC_MAP) |			\
 	 F(CS_MAC_WRITE) |			\
 	 F(CS_MAC_APPEND) |			\
 	 F(CS_MAC_UNLINK) |			\
@@ -281,6 +294,17 @@ static const struct {
 	// TODO: move on
 	{ "acl_group", CS_TYPE_ASSIGN, CS_TYPE_INVALID, CS_ACL_GROUP, F(CS_MAC_EXECUTE) },
 	{ "task.acl_group", CS_TYPE_STRING, CS_TYPE_STRING, CS_SELF_ACL_GROUP, CS_ALL_OK },
+	// TODO: move on
+	{ "prot", CS_TYPE_FILEPERM, CS_TYPE_FILEPERM, CS_COND_NARG1, F(CS_MAC_MAP) | F(CS_MAC_MAP_ANON) },
+	{ "prot_read", CS_TYPE_INVALID, CS_TYPE_FILEPERM, CS_MEMPROT_READ, CS_ALL_OK },
+	{ "prot_write", CS_TYPE_INVALID, CS_TYPE_FILEPERM, CS_MEMPROT_WRITE, CS_ALL_OK },
+	{ "prot_exec", CS_TYPE_INVALID, CS_TYPE_FILEPERM, CS_MEMPROT_EXEC, CS_ALL_OK },
+	{ "vma",                  CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
+	  CS_COND_NARG2,            F(CS_MAC_MAP_ANON) | F(CS_MAC_MAP) },
+	{ "mem_stack", CS_TYPE_INVALID, CS_TYPE_NUMBER, CS_MEMTARG_STACK, CS_ALL_OK },
+	{ "mem_heap", CS_TYPE_INVALID, CS_TYPE_NUMBER, CS_MEMTARG_HEAP, CS_ALL_OK },
+	{ "mem", CS_TYPE_INVALID, CS_TYPE_NUMBER, CS_MEMTARG_OTHER, CS_ALL_OK },
+	{ "mem_cow", CS_TYPE_INVALID, CS_TYPE_NUMBER, CS_MEMTARG_OTHER_COW, CS_ALL_OK },
 	{ "addr",                    CS_TYPE_STRING,   CS_TYPE_STRING,
 	  CS_COND_SARG0,            CS_UNIX_SOCKET_OK },
 	{ "argc",                    CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
@@ -724,58 +748,58 @@ static const struct {
 	{ "symlink",                 CS_TYPE_INVALID,  CS_TYPE_FILETYPE,
 	  CS_OBJ_IS_SYMLINK,        CS_ALL_OK },
 	{ "target",                  CS_TYPE_STRING,   CS_TYPE_STRING,
-	  CS_COND_SARG1,            F(CS_MAC_MOUNT) | F(CS_MAC_SYMLINK) },
+	  CS_COND_SARG1,            F(CS_MAC_MOUNT) | F(CS_MAC_SYMLINK) | F(CS_MAC_MAP) },
 	{ "target.dev_major",        CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_DEV_MAJOR,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.dev_minor",        CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_DEV_MINOR,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.fsmagic",          CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.gid",              CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_GID,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.ino",              CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_INO,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.major",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_MAJOR,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.minor",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_MINOR,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.parent.fsmagic",   CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.parent.gid",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_GID,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.parent.ino",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_INO,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.parent.major",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_MAJOR,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.parent.minor",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_MINOR,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.parent.perm",      CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
 	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_PERM,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.parent.uid",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_UID,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.perm",             CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
 	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_PERM,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.type",             CS_TYPE_FILETYPE, CS_TYPE_FILETYPE,
 	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_TYPE,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "target.uid",              CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_UID,
-	  F(CS_MAC_MOUNT) },
+	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "task.domain",             CS_TYPE_STRING,   CS_TYPE_STRING,
 	  CS_SELF_DOMAIN,           CS_ALL_OK },
 	{ "task.egid",               CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
@@ -1886,8 +1910,8 @@ static enum cs_conditions_index cs_parse_lefthand_try_xattr(char *word, const en
 	return CS_INVALID_CONDITION;
 }
 
-
-static const char *cs_xattr_get_prefix(const enum cs_mac_index mac, const enum cs_conditions_index idx){
+// TODO docs
+static const char *cs_print_path_xattr_prefix(const enum cs_mac_index mac, const enum cs_conditions_index idx){
 	unsigned int i;
 	const bool is_parent = (idx == CS_XATTR_PARENT_ENTRY ||
 							idx == CS_XATTR2_PARENT_ENTRY);
@@ -1905,6 +1929,43 @@ static const char *cs_xattr_get_prefix(const enum cs_mac_index mac, const enum c
 
 	return "unknown"; /* This should not happen. */
 }
+
+// TODO docs
+static inline int cs_print_map_prot(const int ret, char *buf, int len, const unsigned long prot)
+{
+	/* We'll fail after previous snprintf() */
+	if (ret >= len || ret < 0) return ret;
+
+	char *r = "prot!=prot_read";
+	char *w = "prot!=prot_write";
+	char *x = "prot!=prot_exec";
+
+	if (prot & PROT_READ)
+		r = "prot=prot_read";
+	if (prot & PROT_WRITE)
+		w = "prot=prot_write";
+	if (prot & PROT_EXEC)
+		x = "prot=prot_exec";
+
+	return ret + snprintf(buf + ret, len - ret, " %s %s %s", r, w, x);
+}
+
+static inline const char *cs_print_map_vma(const enum cs_memory_targets vma_target)
+{
+
+	if (vma_target >= CS_MAX_MEMORY_TARGET || vma_target < 0)
+		return "unknown"; /* This should not happen. */
+
+	return cs_memory_target2name[vma_target];
+}
+
+static inline const char *cs_print_map_mprotect_hint(const bool mprotect) {
+	char *hint = "";
+	if (mprotect) hint = " (mprotect)";
+	return hint;
+}
+
+
 
 /**
  * cs_parse_lefthand - Parse special lefthand conditions.
@@ -2652,7 +2713,7 @@ static bool cs_print_condition_loop(struct cs_io_buffer *head,
 		case CS_XATTR_PARENT_ENTRY:  
 		case CS_XATTR2_ENTRY:  
 		case CS_XATTR2_PARENT_ENTRY:  
-			cs_set_string(head, cs_xattr_get_prefix(type, left));  
+			cs_set_string(head, cs_print_path_xattr_prefix(type, left));  
 			if (left == CS_XATTR_PARENT_ENTRY || left == CS_XATTR2_PARENT_ENTRY)  
 				cs_set_string(head, "parent.");  
 			cs_set_string(head, "xattr[\"");  
@@ -3787,6 +3848,24 @@ static int cs_print_param(struct cs_request_info *r, char *buf, int len)
 	case CS_MAC_EXECUTE:
 		return snprintf(buf, len, " exec=\"%s\" path=\"%s\"",
 				r->param.s[1]->name, r->param.s[0]->name);
+	// TODO: Hint user if filesystem is overlaying?
+	// XXX: unite both CA_MAC_MAP* entries?
+	case CS_MAC_MAP: {
+		const int ret = snprintf(buf, len, "%s path=\"%s\" target=\"%s\" vma=%s",
+							cs_print_map_mprotect_hint(r->param.i[0]),
+							r->param.s[0]->name,
+							r->param.s[1]->name,
+							cs_print_map_vma(r->param.i[2])
+							);
+		return cs_print_map_prot(ret, buf, len, r->param.i[1]);
+	}
+	case CS_MAC_MAP_ANON: {
+		 const int ret = snprintf(buf, len, "%s vma=%s",
+								  cs_print_map_mprotect_hint(r->param.i[0]),
+								  cs_print_map_vma(r->param.i[2])
+								 );
+		return cs_print_map_prot(ret, buf, len, r->param.i[1]);
+	}
 	case CS_MAC_READ:
 	case CS_MAC_WRITE:
 	case CS_MAC_APPEND:

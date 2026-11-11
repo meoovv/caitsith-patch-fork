@@ -18,6 +18,8 @@
 int ccs_mmap_file(const struct file *file, unsigned long prot, unsigned long flags);
 int ccs_mmap_backing_file(const struct vm_area_struct *vma, const struct file *backing_file, const struct file *user_file);
 int ccs_file_mprotect(const struct vm_area_struct *vma, const unsigned long reqprot, const unsigned long prot);
+int ccs_mmap_addr(const unsigned long addr);
+
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 7, 0)
 int ccs_settime(const struct timespec64 *ts, const struct timezone *tz);
@@ -106,6 +108,10 @@ static inline int ccs_mmap_backing_file(const struct vm_area_struct *vma, const 
 }
 
 static inline int ccs_file_mprotect(const struct vm_area_struct *vma, const unsigned long reqprot, const unsigned long prot) {
+	return 0;
+}
+
+static inline int ccs_mmap_addr(const unsigned long addr) {
 	return 0;
 }
 

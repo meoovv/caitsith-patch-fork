@@ -80,6 +80,7 @@ struct caitsith_operations {
 	int(*mmap_file_permission)(const struct file *file, unsigned long prot, unsigned long flags);
 	int(*mmap_backing_file_permission)(const struct vm_area_struct *vma, const struct file *backing_file, const struct file *user_file);
 	int(*file_mprotect_permission)(const struct vm_area_struct *vma, const unsigned long reqprot, const unsigned long prot);
+	int(*mmap_addr_permission)(const unsigned long addr);
 
 	void (*check_profile)(void);
 	int (*chroot_permission)(const struct path *path);
@@ -204,6 +205,11 @@ static inline int ccs_file_mprotect_permission(const struct vm_area_struct *vma,
 	return func ? func(vma, reqprot, prot) : 0;
 }
 
+static inline int ccs_mmap_addr_permission(const unsigned long addr) {
+	int (*func)(const unsigned long addr) = caitsith_ops.mmap_addr_permission;
+
+	return func ? func(addr) : 0;
+}
 
 
 static inline int ccs_chroot_permission(const struct path *path)

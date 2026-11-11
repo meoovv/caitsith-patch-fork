@@ -166,6 +166,7 @@ static int cs_open_exec_permission(struct dentry *dentry,
 static int cs_mmap_backing_file_permission(const struct vm_area_struct *vma, const struct file *backing_file, const struct file *user_file);
 static int cs_mmap_file_permission(const struct file *file, unsigned long prot, unsigned long flags);
 static int cs_file_mprotect_permission(const struct vm_area_struct *vma, const unsigned long reqprot __always_unused, const unsigned long prot);
+static int cs_mmap_addr_permission(const unsigned long addr);
 
 static int cs_open_permission(const struct path *path, const int flag);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 33) && defined(CONFIG_SYSCTL_SYSCALL)
@@ -1325,6 +1326,7 @@ void __init cs_permission_init(void)
 	caitsith_ops.mmap_backing_file_permission = cs_mmap_backing_file_permission;
 	caitsith_ops.mmap_file_permission = cs_mmap_file_permission;
 	caitsith_ops.file_mprotect_permission = cs_file_mprotect_permission;
+	caitsith_ops.mmap_addr_permission = cs_mmap_addr_permission;
 	caitsith_ops.fcntl_permission = cs_fcntl_permission;
 	caitsith_ops.ioctl_permission = cs_ioctl_permission;
 	caitsith_ops.chmod_permission = cs_chmod_permission;
@@ -1738,6 +1740,21 @@ static int cs_old_open_permission(struct dentry *dentry, struct vfsmount *mnt,
 
 #endif
 
+// TODO docs
+static int cs_mmap_addr_permission(const unsigned long addr) {
+
+	int error = 0;
+
+	if (!cs_kernel_service() && addr < CONFIG_CAITSITH_MMAP_MIN_ADDR) {
+		struct cs_request_info r = { };
+		r.type = CS_MAC_MAP_LOW;
+		r.param.i[0] = addr;
+		error = cs_check_acl(&r, false);
+		cs_clear_request_info(&r);
+	}
+	return error;
+}
+
 
 static inline int cs_mmap_file_shared_acl(const struct path path, const unsigned long prot, const bool mprotect)
 {
@@ -1893,7 +1910,6 @@ static int cs_file_mprotect_permission(const struct vm_area_struct *vma, const u
 						vma->vm_flags & VM_SHARED,
 						prot, vma_target);
 }
-
 
 
 /**

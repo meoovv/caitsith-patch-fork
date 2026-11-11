@@ -33,6 +33,7 @@ static const char * const cs_mac_keywords[CS_MAX_MAC_INDEX] = {
 	[CS_MAC_READ]       = "read",
 	[CS_MAC_MAP]       = "map",
 	[CS_MAC_MAP_ANON]       = "map_anon",
+	[CS_MAC_MAP_LOW]       = "use_map_low",
 	[CS_MAC_WRITE]      = "write",
 	[CS_MAC_APPEND]     = "append",
 	[CS_MAC_CREATE]     = "create",
@@ -139,6 +140,7 @@ static const char * const cs_memory_headers[CS_MAX_MEMORY_STAT] = {
 	 F(CS_MAC_READ) |			\
 	 F(CS_MAC_MAP) |			\
 	 F(CS_MAC_MAP_ANON) |			\
+	 F(CS_MAC_MAP_LOW) |			\
 	 F(CS_MAC_WRITE) |			\
 	 F(CS_MAC_APPEND) |			\
 	 F(CS_MAC_CREATE) |			\
@@ -305,6 +307,8 @@ static const struct {
 	{ "mem_heap", CS_TYPE_INVALID, CS_TYPE_NUMBER, CS_MEMTARG_HEAP, CS_ALL_OK },
 	{ "mem", CS_TYPE_INVALID, CS_TYPE_NUMBER, CS_MEMTARG_OTHER, CS_ALL_OK },
 	{ "mem_cow", CS_TYPE_INVALID, CS_TYPE_NUMBER, CS_MEMTARG_OTHER_COW, CS_ALL_OK },
+	{ "addr",					CS_TYPE_NUMBER, 	CS_TYPE_NUMBER,
+	  CS_COND_NARG0,			F(CS_MAC_MAP_LOW) },
 	{ "addr",                    CS_TYPE_STRING,   CS_TYPE_STRING,
 	  CS_COND_SARG0,            CS_UNIX_SOCKET_OK },
 	{ "argc",                    CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
@@ -3866,6 +3870,8 @@ static int cs_print_param(struct cs_request_info *r, char *buf, int len)
 								 );
 		return cs_print_map_prot(ret, buf, len, r->param.i[1]);
 	}
+	case CS_MAC_MAP_LOW:
+		return snprintf(buf, len, " addr=0x%lx", r->param.i[0]);
 	case CS_MAC_READ:
 	case CS_MAC_WRITE:
 	case CS_MAC_APPEND:

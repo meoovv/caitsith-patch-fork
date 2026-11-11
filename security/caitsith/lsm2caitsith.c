@@ -23,9 +23,9 @@ int ccs_file_mprotect(const struct vm_area_struct *vma, const unsigned long reqp
 	return ccs_file_mprotect_permission(vma, reqprot, prot);
 }
 
-/*int ccs_mmap_addr(unsigned long addr) {
+int ccs_mmap_addr(const unsigned long addr) {
 	return ccs_mmap_addr_permission(addr);
-}*/
+}
 
 
 int ccs_sb_umount(struct vfsmount *mnt, int flags)
@@ -285,7 +285,7 @@ static struct security_hook_list caitsith_hooks[] = {
 	LSM_HOOK_INIT(file_mprotect, ccs_file_mprotect),
 
 	LSM_HOOK_INIT(mmap_file, ccs_mmap_file),
-	//LSM_HOOK_INIT(mmap_addr, ccs_mmap_addr),
+	LSM_HOOK_INIT(mmap_addr, ccs_mmap_addr),
 	LSM_HOOK_INIT(settime, ccs_settime),
 	LSM_HOOK_INIT(sb_mount, ccs_sb_mount),
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0)

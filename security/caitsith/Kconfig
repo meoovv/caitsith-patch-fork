@@ -169,3 +169,12 @@ config CAITSITH_AUTO_DOMAIN_TRANSITION
 
 config CAITSITH_NETWORK_RECVMSG
 	def_bool CAITSITH_NETWORK
+
+config CAITSITH_MMAP_MIN_ADDR
+	int "Low address space for LSM to protect from user allocation"
+	depends on CAITSITH 
+	default 32768 if ARM || (ARM64 && COMPAT)
+	default 65536
+	help
+		LSM_MMAP_MIN_ADDR clone for CaitSith, defaults to 32768 on ARM 
+		systems and to 65536 otherwise

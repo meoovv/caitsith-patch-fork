@@ -27,95 +27,13 @@ static const char * const cs_memory_target2name[CS_MAX_MEMORY_TARGET] = {
 	[CS_MEMORY_OTHER_COW] = "mem_cow",	
 };
 
-/* String table for operation. */
-static const char * const cs_mac_keywords[CS_MAX_MAC_INDEX] = {
-	[CS_MAC_EXECUTE]    = "execute",
-	[CS_MAC_READ]       = "read",
-	[CS_MAC_MAP]       = "map",
-	[CS_MAC_MAP_ANON]       = "map_anon",
-	[CS_MAC_MAP_LOW]       = "use_map_low",
-	[CS_MAC_WRITE]      = "write",
-	[CS_MAC_APPEND]     = "append",
-	[CS_MAC_CREATE]     = "create",
-	[CS_MAC_UNLINK]     = "unlink",
-#ifdef CONFIG_CAITSITH_GETATTR
-	[CS_MAC_GETATTR]    = "getattr",
-#endif
-	[CS_MAC_MKDIR]      = "mkdir",
-	[CS_MAC_RMDIR]      = "rmdir",
-	[CS_MAC_MKFIFO]     = "mkfifo",
-	[CS_MAC_MKSOCK]     = "mksock",
-	[CS_MAC_TRUNCATE]   = "truncate",
-	[CS_MAC_SYMLINK]    = "symlink",
-	[CS_MAC_MKBLOCK]    = "mkblock",
-	[CS_MAC_MKCHAR]     = "mkchar",
-	[CS_MAC_LINK]       = "link",
-	[CS_MAC_RENAME]     = "rename",
-	[CS_MAC_CHMOD]      = "chmod",
-	[CS_MAC_CHOWN]      = "chown",
-	[CS_MAC_CHGRP]      = "chgrp",
-	[CS_MAC_IOCTL]      = "ioctl",
-	[CS_MAC_CHROOT]     = "chroot",
-	[CS_MAC_MOUNT]      = "mount",
-	[CS_MAC_UMOUNT]     = "unmount",
-	[CS_MAC_PIVOT_ROOT] = "pivot_root",
-#ifdef CONFIG_CAITSITH_NETWORK
-	[CS_MAC_INET_STREAM_BIND]       = "inet_stream_bind",
-	[CS_MAC_INET_STREAM_LISTEN]     = "inet_stream_listen",
-	[CS_MAC_INET_STREAM_CONNECT]    = "inet_stream_connect",
-	[CS_MAC_INET_STREAM_ACCEPT]     = "inet_stream_accept",
-	[CS_MAC_INET_DGRAM_BIND]        = "inet_dgram_bind",
-	[CS_MAC_INET_DGRAM_SEND]        = "inet_dgram_send",
-#ifdef CONFIG_CAITSITH_NETWORK_RECVMSG
-	[CS_MAC_INET_DGRAM_RECV]        = "inet_dgram_recv",
-#endif
-	[CS_MAC_INET_RAW_BIND]          = "inet_raw_bind",
-	[CS_MAC_INET_RAW_SEND]          = "inet_raw_send",
-#ifdef CONFIG_CAITSITH_NETWORK_RECVMSG
-	[CS_MAC_INET_RAW_RECV]          = "inet_raw_recv",
-#endif
-	[CS_MAC_UNIX_STREAM_BIND]       = "unix_stream_bind",
-	[CS_MAC_UNIX_STREAM_LISTEN]     = "unix_stream_listen",
-	[CS_MAC_UNIX_STREAM_CONNECT]    = "unix_stream_connect",
-	[CS_MAC_UNIX_STREAM_ACCEPT]     = "unix_stream_accept",
-	[CS_MAC_UNIX_DGRAM_BIND]        = "unix_dgram_bind",
-	[CS_MAC_UNIX_DGRAM_SEND]        = "unix_dgram_send",
-#ifdef CONFIG_CAITSITH_NETWORK_RECVMSG
-	[CS_MAC_UNIX_DGRAM_RECV]        = "unix_dgram_recv",
-#endif
-	[CS_MAC_UNIX_SEQPACKET_BIND]    = "unix_seqpacket_bind",
-	[CS_MAC_UNIX_SEQPACKET_LISTEN]  = "unix_seqpacket_listen",
-	[CS_MAC_UNIX_SEQPACKET_CONNECT] = "unix_seqpacket_connect",
-	[CS_MAC_UNIX_SEQPACKET_ACCEPT]  = "unix_seqpacket_accept",
-#endif
-#ifdef CONFIG_CAITSITH_ENVIRON
-	[CS_MAC_ENVIRON] = "environ",
-#endif
-#ifdef CONFIG_CAITSITH_PTRACE
-	[CS_MAC_PTRACE] = "ptrace",
-#endif
-#ifdef CONFIG_CAITSITH_SIGNAL
-	[CS_MAC_SIGNAL] = "signal",
-#endif
-	[CS_MAC_MODIFY_POLICY]      = "modify_policy",
-#ifdef CONFIG_CAITSITH_CAPABILITY
-	[CS_MAC_USE_NETLINK_SOCKET] = "use_netlink_socket",
-	[CS_MAC_USE_PACKET_SOCKET]  = "use_packet_socket",
-	[CS_MAC_USE_REBOOT]         = "use_reboot",
-	[CS_MAC_USE_VHANGUP]        = "use_vhangup",
-	[CS_MAC_SET_TIME]           = "set_time",
-	[CS_MAC_SET_PRIORITY]       = "set_priority",
-	[CS_MAC_SET_HOSTNAME]       = "set_hostname",
-	[CS_MAC_USE_KERNEL_MODULE]  = "use_kernel_module",
-	[CS_MAC_USE_NEW_KERNEL]     = "use_new_kernel",
-#endif
-#ifdef CONFIG_CAITSITH_AUTO_DOMAIN_TRANSITION
-	[CS_MAC_AUTO_DOMAIN_TRANSITION]   = "auto_domain_transition",
-#endif
-#ifdef CONFIG_CAITSITH_MANUAL_DOMAIN_TRANSITION
-	[CS_MAC_MANUAL_DOMAIN_TRANSITION] = "manual_domain_transition",
-#endif
-};
+
+/* Fill string table for operations from CS_EVERY_MAC */
+#define CS_MAC_KEYWORDS_ROW(mac, keyword) [mac] = keyword,
+	static const char * const cs_mac_keywords[CS_MAX_MAC_INDEX] = {
+		CS_EVERY_MAC(CS_MAC_KEYWORDS_ROW)
+	};
+#undef CS_MAC_KEYWORDS_ROW
 
 /* String table for grouping keywords. */
 static const char * const cs_group_name[CS_MAX_GROUP] = {
@@ -135,71 +53,8 @@ static const char * const cs_memory_headers[CS_MAX_MEMORY_STAT] = {
 
 #define F(bit) (1ULL << bit)
 
-#define CS_ALL_OK				\
-	(F(CS_MAC_EXECUTE) |			\
-	 F(CS_MAC_READ) |			\
-	 F(CS_MAC_MAP) |			\
-	 F(CS_MAC_MAP_ANON) |			\
-	 F(CS_MAC_MAP_LOW) |			\
-	 F(CS_MAC_WRITE) |			\
-	 F(CS_MAC_APPEND) |			\
-	 F(CS_MAC_CREATE) |			\
-	 F(CS_MAC_UNLINK) |			\
-	 F(CS_MAC_GETATTR) |			\
-	 F(CS_MAC_MKDIR) |			\
-	 F(CS_MAC_RMDIR) |			\
-	 F(CS_MAC_MKFIFO) |			\
-	 F(CS_MAC_MKSOCK) |			\
-	 F(CS_MAC_TRUNCATE) |			\
-	 F(CS_MAC_SYMLINK) |			\
-	 F(CS_MAC_MKBLOCK) |			\
-	 F(CS_MAC_MKCHAR) |			\
-	 F(CS_MAC_LINK) |			\
-	 F(CS_MAC_RENAME) |			\
-	 F(CS_MAC_CHMOD) |			\
-	 F(CS_MAC_CHOWN) |			\
-	 F(CS_MAC_CHGRP) |			\
-	 F(CS_MAC_IOCTL) |			\
-	 F(CS_MAC_CHROOT) |			\
-	 F(CS_MAC_MOUNT) |			\
-	 F(CS_MAC_UMOUNT) |			\
-	 F(CS_MAC_PIVOT_ROOT) |			\
-	 F(CS_MAC_INET_STREAM_BIND) |		\
-	 F(CS_MAC_INET_STREAM_LISTEN) |		\
-	 F(CS_MAC_INET_STREAM_CONNECT) |	\
-	 F(CS_MAC_INET_STREAM_ACCEPT) |		\
-	 F(CS_MAC_INET_DGRAM_BIND) |		\
-	 F(CS_MAC_INET_DGRAM_SEND) |		\
-	 F(CS_MAC_INET_DGRAM_RECV) |		\
-	 F(CS_MAC_INET_RAW_BIND) |		\
-	 F(CS_MAC_INET_RAW_SEND) |		\
-	 F(CS_MAC_INET_RAW_RECV) |		\
-	 F(CS_MAC_UNIX_STREAM_BIND) |		\
-	 F(CS_MAC_UNIX_STREAM_LISTEN) |		\
-	 F(CS_MAC_UNIX_STREAM_CONNECT) |	\
-	 F(CS_MAC_UNIX_STREAM_ACCEPT) |		\
-	 F(CS_MAC_UNIX_DGRAM_BIND) |		\
-	 F(CS_MAC_UNIX_DGRAM_SEND) |		\
-	 F(CS_MAC_UNIX_DGRAM_RECV) |		\
-	 F(CS_MAC_UNIX_SEQPACKET_BIND) |	\
-	 F(CS_MAC_UNIX_SEQPACKET_LISTEN) |	\
-	 F(CS_MAC_UNIX_SEQPACKET_CONNECT) |	\
-	 F(CS_MAC_UNIX_SEQPACKET_ACCEPT) |	\
-	 F(CS_MAC_ENVIRON) |			\
-	 F(CS_MAC_PTRACE) |			\
-	 F(CS_MAC_SIGNAL) |			\
-	 F(CS_MAC_MODIFY_POLICY) |		\
-	 F(CS_MAC_USE_NETLINK_SOCKET) |		\
-	 F(CS_MAC_USE_PACKET_SOCKET) |		\
-	 F(CS_MAC_USE_REBOOT) |			\
-	 F(CS_MAC_USE_VHANGUP) |		\
-	 F(CS_MAC_SET_TIME) |			\
-	 F(CS_MAC_SET_PRIORITY) |		\
-	 F(CS_MAC_SET_HOSTNAME) |		\
-	 F(CS_MAC_USE_KERNEL_MODULE) |		\
-	 F(CS_MAC_USE_NEW_KERNEL) |		\
-	 F(CS_MAC_AUTO_DOMAIN_TRANSITION) |	\
-	 F(CS_MAC_MANUAL_DOMAIN_TRANSITION))
+#define CS_ALL_OK_EXP(mac, __unused) F(mac) |
+#define CS_ALL_OK (CS_EVERY_MAC(CS_ALL_OK_EXP) 0ULL)
 
 #define CS_PATH_SELF_OK				\
 	(F(CS_MAC_EXECUTE) |			\
@@ -334,51 +189,16 @@ static const struct {
 	  CS_EXEC_ENVC,             CS_EXECUTE_OR_ENVIRON_OK },
 	{ "exec",                    CS_TYPE_STRING,   CS_TYPE_STRING,
 	  CS_COND_SARG1,            CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.fsmagic",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.gid",                CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_GID,
-	  CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.ino",                CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_INO,
-	  CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.major",              CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_MAJOR,
-	  CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.minor",              CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_MINOR,
-	  CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.parent.fsmagic",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.parent.gid",         CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_GID,
-	  CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.parent.ino",         CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_INO,
-	  CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.parent.major",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_MAJOR,
-	  CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.parent.minor",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_MINOR,
-	  CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.parent.perm",        CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_PERM,
-	  CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.parent.uid",         CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_UID,
-	  CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.perm",               CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_PERM,
-	  CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.type",               CS_TYPE_FILETYPE, CS_TYPE_FILETYPE,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_TYPE,
-	  CS_EXECUTE_OR_ENVIRON_OK },
-	{ "exec.uid",                CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_UID,
-	  CS_EXECUTE_OR_ENVIRON_OK },
+	{ "new_root",                CS_TYPE_STRING,   CS_TYPE_STRING,
+	  CS_COND_SARG0,            F(CS_MAC_PIVOT_ROOT) },
+	{ "new_path",                CS_TYPE_STRING,   CS_TYPE_STRING,
+	  CS_COND_SARG1,            CS_RENAME_OR_LINK_OK },
+	{ "old_path",                CS_TYPE_STRING,    CS_TYPE_STRING,
+	  CS_COND_SARG0,            CS_RENAME_OR_LINK_OK },
+	{ "source",                  CS_TYPE_STRING,   CS_TYPE_STRING,
+	  CS_COND_SARG0,            F(CS_MAC_MOUNT) },
+	{ "target",                  CS_TYPE_STRING,   CS_TYPE_STRING,
+	  CS_COND_SARG1,            F(CS_MAC_MOUNT) | F(CS_MAC_SYMLINK) | F(CS_MAC_MAP) },
 	{ "execute_handler",         CS_TYPE_INVALID,  CS_TYPE_TASKTYPE,
 	  CS_TASK_EXECUTE_HANDLER,  CS_ALL_OK },
 	{ "fifo",                    CS_TYPE_INVALID,  CS_TYPE_FILETYPE,
@@ -403,165 +223,6 @@ static const struct {
 	  CS_COND_IPARG,            CS_INET_SOCKET_OK },
 	{ "name",                    CS_TYPE_STRING,   CS_TYPE_STRING,
 	  CS_COND_SARG2,            F(CS_MAC_ENVIRON) },
-	{ "new_path",                CS_TYPE_STRING,   CS_TYPE_STRING,
-	  CS_COND_SARG1,            CS_RENAME_OR_LINK_OK },
-	{ "new_path.dev_major",      CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_DEV_MAJOR,
-	  F(CS_MAC_RENAME) },
-	{ "new_path.dev_minor",      CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_DEV_MINOR,
-	  F(CS_MAC_RENAME) },
-	{ "new_path.fsmagic",        CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  F(CS_MAC_RENAME) },
-	{ "new_path.gid",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_GID,
-	  F(CS_MAC_RENAME) },
-	{ "new_path.ino",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_INO,
-	  F(CS_MAC_RENAME) },
-	{ "new_path.major",          CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_MAJOR,
-	  F(CS_MAC_RENAME) },
-	{ "new_path.minor",          CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_MINOR,
-	  F(CS_MAC_RENAME) },
-	{ "new_path.parent.fsmagic", CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  CS_RENAME_OR_LINK_OK },
-	{ "new_path.parent.gid",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_GID,
-	  CS_RENAME_OR_LINK_OK },
-	{ "new_path.parent.ino",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_INO,
-	  CS_RENAME_OR_LINK_OK },
-	{ "new_path.parent.major",   CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_MAJOR,
-	  CS_RENAME_OR_LINK_OK },
-	{ "new_path.parent.minor",   CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_MINOR,
-	  CS_RENAME_OR_LINK_OK },
-	{ "new_path.parent.perm",    CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_PERM,
-	  CS_RENAME_OR_LINK_OK },
-	{ "new_path.parent.uid",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_UID,
-	  CS_RENAME_OR_LINK_OK },
-	{ "new_path.perm",           CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_PERM,
-	  F(CS_MAC_RENAME) },
-	{ "new_path.type",           CS_TYPE_FILETYPE, CS_TYPE_FILETYPE,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_TYPE,
-	  F(CS_MAC_RENAME) },
-	{ "new_path.uid",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_UID,
-	  F(CS_MAC_RENAME) },
-	{ "new_root",                CS_TYPE_STRING,   CS_TYPE_STRING,
-	  CS_COND_SARG0,            F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.dev_major",      CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_DEV_MAJOR,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.dev_minor",      CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_DEV_MINOR,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.fsmagic",        CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.gid",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_GID,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.ino",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_INO,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.major",          CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_MAJOR,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.minor",          CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_MINOR,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.parent.fsmagic", CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.parent.gid",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_GID,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.parent.ino",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_INO,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.parent.major",   CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_MAJOR,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.parent.minor",   CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_MINOR,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.parent.perm",    CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_PERM,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.parent.uid",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_UID,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.perm",           CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_PERM,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.type",           CS_TYPE_FILETYPE, CS_TYPE_FILETYPE,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_TYPE,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "new_root.uid",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_UID,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "old_path",                CS_TYPE_STRING,    CS_TYPE_STRING,
-	  CS_COND_SARG0,            CS_RENAME_OR_LINK_OK },
-	{ "old_path.dev_major",      CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_DEV_MAJOR,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.dev_minor",      CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_DEV_MINOR,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.fsmagic",        CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.gid",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_GID,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.ino",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_INO,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.major",          CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_MAJOR,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.minor",          CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_MINOR,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.parent.fsmagic", CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.parent.gid",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_GID,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.parent.ino",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_INO,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.parent.major",   CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_MAJOR,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.parent.minor",   CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_MINOR,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.parent.perm",    CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_PERM,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.parent.uid",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_UID,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.perm",           CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_PERM,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.type",           CS_TYPE_FILETYPE, CS_TYPE_FILETYPE,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_TYPE,
-	  CS_RENAME_OR_LINK_OK },
-	{ "old_path.uid",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_UID,
-	  CS_RENAME_OR_LINK_OK },
 	{ "others_execute",          CS_TYPE_INVALID,  CS_TYPE_FILEPERM,
 	  CS_MODE_OTHERS_EXECUTE,   CS_ALL_OK },
 	{ "others_read",             CS_TYPE_INVALID,  CS_TYPE_FILEPERM,
@@ -576,57 +237,6 @@ static const struct {
 	  CS_MODE_OWNER_WRITE,      CS_ALL_OK },
 	{ "path",                    CS_TYPE_STRING,   CS_TYPE_STRING,
 	  CS_COND_SARG0,            CS_PATH_OK },
-	{ "path.dev_major",          CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_DEV_MAJOR,
-	  CS_PATH_SELF_OK },
-	{ "path.dev_minor",          CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_DEV_MINOR,
-	  CS_PATH_SELF_OK },
-	{ "path.fsmagic",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  CS_PATH_SELF_OK },
-	{ "path.gid",                CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_GID,
-	  CS_PATH_SELF_OK },
-	{ "path.ino",                CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_INO,
-	  CS_PATH_SELF_OK },
-	{ "path.major",              CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_MAJOR,
-	  CS_PATH_SELF_OK },
-	{ "path.minor",              CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_MINOR,
-	  CS_PATH_SELF_OK },
-	{ "path.parent.fsmagic",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  CS_PATH_OK },
-	{ "path.parent.gid",         CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_GID,
-	  CS_PATH_OK },
-	{ "path.parent.ino",         CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_INO,
-	  CS_PATH_OK },
-	{ "path.parent.major",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_MAJOR,
-	  CS_PATH_OK },
-	{ "path.parent.minor",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_MINOR,
-	  CS_PATH_OK },
-	{ "path.parent.perm",        CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_PERM,
-	  CS_PATH_OK },
-	{ "path.parent.uid",         CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_UID,
-	  CS_PATH_OK },
-	{ "path.perm",               CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_PERM,
-	  CS_PATH_SELF_OK },
-	{ "path.type",               CS_TYPE_FILETYPE, CS_TYPE_FILETYPE,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_TYPE,
-	  CS_PATH_SELF_OK },
-	{ "path.uid",                CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_UID,
-	  CS_PATH_SELF_OK },
 	{ "perm",                    CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
 	  CS_COND_NARG0,            CS_PATH_PERM_OK },
 	{ "port",                    CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
@@ -635,57 +245,6 @@ static const struct {
 	  CS_COND_NARG0,            CS_RAW_SOCKET_OK },
 	{ "put_old",                 CS_TYPE_STRING,   CS_TYPE_STRING,
 	  CS_COND_SARG1,            F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.dev_major",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_DEV_MAJOR,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.dev_minor",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_DEV_MINOR,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.fsmagic",         CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.gid",             CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_GID,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.ino",             CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_INO,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.major",           CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_MAJOR,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.minor",           CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_MINOR,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.parent.fsmagic",  CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.parent.gid",      CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_GID,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.parent.ino",      CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_INO,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.parent.major",    CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_MAJOR,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.parent.minor",    CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_MINOR,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.parent.perm",     CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_PERM,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.parent.uid",      CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_UID,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.perm",            CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_PERM,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.type",            CS_TYPE_FILETYPE, CS_TYPE_FILETYPE,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_TYPE,
-	  F(CS_MAC_PIVOT_ROOT) },
-	{ "put_old.uid",             CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_UID,
-	  F(CS_MAC_PIVOT_ROOT) },
 	{ "setgid",                  CS_TYPE_INVALID,  CS_TYPE_FILEPERM,
 	  CS_MODE_SETGID,           CS_ALL_OK },
 	{ "setuid",                  CS_TYPE_INVALID,  CS_TYPE_FILEPERM,
@@ -694,116 +253,10 @@ static const struct {
 	  CS_COND_NARG0,            F(CS_MAC_SIGNAL) },
 	{ "socket",                  CS_TYPE_INVALID,  CS_TYPE_FILETYPE,
 	  CS_OBJ_IS_SOCKET,         CS_ALL_OK },
-	{ "source",                  CS_TYPE_STRING,   CS_TYPE_STRING,
-	  CS_COND_SARG0,            F(CS_MAC_MOUNT) },
-	{ "source.dev_major",        CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_DEV_MAJOR,
-	  F(CS_MAC_MOUNT) },
-	{ "source.dev_minor",        CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_DEV_MINOR,
-	  F(CS_MAC_MOUNT) },
-	{ "source.fsmagic",          CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  F(CS_MAC_MOUNT) },
-	{ "source.gid",              CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_GID,
-	  F(CS_MAC_MOUNT) },
-	{ "source.ino",              CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_INO,
-	  F(CS_MAC_MOUNT) },
-	{ "source.major",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_MAJOR,
-	  F(CS_MAC_MOUNT) },
-	{ "source.minor",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_MINOR,
-	  F(CS_MAC_MOUNT) },
-	{ "source.parent.fsmagic",   CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  F(CS_MAC_MOUNT) },
-	{ "source.parent.gid",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_GID,
-	  F(CS_MAC_MOUNT) },
-	{ "source.parent.ino",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_INO,
-	  F(CS_MAC_MOUNT) },
-	{ "source.parent.major",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_MAJOR,
-	  F(CS_MAC_MOUNT) },
-	{ "source.parent.minor",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_MINOR,
-	  F(CS_MAC_MOUNT) },
-	{ "source.parent.perm",      CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_PERM,
-	  F(CS_MAC_MOUNT) },
-	{ "source.parent.uid",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 16 + CS_PATH_ATTRIBUTE_UID,
-	  F(CS_MAC_MOUNT) },
-	{ "source.perm",             CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_PERM,
-	  F(CS_MAC_MOUNT) },
-	{ "source.type",             CS_TYPE_FILETYPE, CS_TYPE_FILETYPE,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_TYPE,
-	  F(CS_MAC_MOUNT) },
-	{ "source.uid",              CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + CS_PATH_ATTRIBUTE_UID,
-	  F(CS_MAC_MOUNT) },
 	{ "sticky",                  CS_TYPE_INVALID,  CS_TYPE_FILEPERM,
 	  CS_MODE_STICKY,           CS_ALL_OK },
 	{ "symlink",                 CS_TYPE_INVALID,  CS_TYPE_FILETYPE,
 	  CS_OBJ_IS_SYMLINK,        CS_ALL_OK },
-	{ "target",                  CS_TYPE_STRING,   CS_TYPE_STRING,
-	  CS_COND_SARG1,            F(CS_MAC_MOUNT) | F(CS_MAC_SYMLINK) | F(CS_MAC_MAP) },
-	{ "target.dev_major",        CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_DEV_MAJOR,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.dev_minor",        CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_DEV_MINOR,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.fsmagic",          CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.gid",              CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_GID,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.ino",              CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_INO,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.major",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_MAJOR,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.minor",            CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_MINOR,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.parent.fsmagic",   CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_FSMAGIC,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.parent.gid",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_GID,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.parent.ino",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_INO,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.parent.major",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_MAJOR,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.parent.minor",     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_MINOR,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.parent.perm",      CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_PERM,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.parent.uid",       CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 48 + CS_PATH_ATTRIBUTE_UID,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.perm",             CS_TYPE_FILEPERM, CS_TYPE_FILEPERM,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_PERM,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.type",             CS_TYPE_FILETYPE, CS_TYPE_FILETYPE,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_TYPE,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
-	{ "target.uid",              CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
-	  CS_PATH_ATTRIBUTE_START + 32 + CS_PATH_ATTRIBUTE_UID,
-	  F(CS_MAC_MOUNT) | F(CS_MAC_MAP) },
 	{ "task.domain",             CS_TYPE_STRING,   CS_TYPE_STRING,
 	  CS_SELF_DOMAIN,           CS_ALL_OK },
 	{ "task.egid",               CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
@@ -839,6 +292,75 @@ static const struct {
 	{ "value",                   CS_TYPE_STRING,   CS_TYPE_STRING,
 	  CS_COND_SARG3,            F(CS_MAC_ENVIRON) },
 };
+
+
+#define CS_PATH_ATTR_OK_BUT(ok, but) (ok & ~(but))  
+#define CS_PATH_ATTR_OK(ok_for) (ok_for |CS_RENAME_OR_LINK_OK | F(CS_MAC_PIVOT_ROOT) | F(CS_MAC_MOUNT) | F(CS_MAC_MAP))
+
+#define CS_PATH_ATTR_SELF_OK CS_PATH_ATTR_OK(CS_PATH_SELF_OK)
+#define CS_PATH_ATTR_PARENT_OK CS_PATH_ATTR_OK(CS_PATH_OK)
+
+#define CS_PATH_ATTR_SELF_OK_BUT(but) CS_PATH_ATTR_OK_BUT(CS_PATH_ATTR_SELF_OK, but)
+
+/* prefix, path slot, avail_self, avail_parent */
+#define CS_EVERY_PATH_ATTR_PREFIX(a, ...)															\
+	a("path.",     0,  CS_PATH_SELF_OK, CS_PATH_OK, ##__VA_ARGS__)										\
+	a("exec.",     32, CS_EXECUTE_OR_ENVIRON_OK, CS_EXECUTE_OR_ENVIRON_OK, ##__VA_ARGS__)				\
+	a("old_path.", 0,  CS_RENAME_OR_LINK_OK, CS_RENAME_OR_LINK_OK, ##__VA_ARGS__)						\
+	a("new_path.", 32, F(CS_MAC_RENAME), CS_RENAME_OR_LINK_OK, ##__VA_ARGS__)							\
+	a("source.",   0,  F(CS_MAC_MOUNT), F(CS_MAC_MOUNT), ##__VA_ARGS__)									\
+	a("new_root.", 0,  F(CS_MAC_PIVOT_ROOT), F(CS_MAC_PIVOT_ROOT), ##__VA_ARGS__)						\
+	a("put_old.",  32, F(CS_MAC_PIVOT_ROOT), F(CS_MAC_PIVOT_ROOT), ##__VA_ARGS__)						\
+	a("target.",   32, F(CS_MAC_MOUNT)|F(CS_MAC_MAP), F(CS_MAC_MOUNT)|F(CS_MAC_MAP), ##__VA_ARGS__)
+
+
+/* */
+#define CS_PATH_ATTR_PREFIXES_ENTRY_EXP(prefix, slot, avail_self, avail_parent,		Mac, Path_num, Parent)	\
+	slot >> 5 == Path_num && (Parent ? avail_parent : avail_self) & F(Mac) ? prefix :  
+
+
+
+#define CS_PATH_ATTR_PREFIXES_ENTRY(Mac, Path_num, Parent) CS_EVERY_PATH_ATTR_PREFIX(CS_PATH_ATTR_PREFIXES_ENTRY_EXP, Mac, Path_num, Parent) NULL
+	
+#define CS_PATH_ATTR_PREFIXES_ROW(mac, __unused)													\
+	[mac] = {																							\
+		{ CS_PATH_ATTR_PREFIXES_ENTRY(mac, 0, false), CS_PATH_ATTR_PREFIXES_ENTRY(mac, 0, true) },		\
+		{ CS_PATH_ATTR_PREFIXES_ENTRY(mac, 1, false), CS_PATH_ATTR_PREFIXES_ENTRY(mac, 1, true) }		\
+	},
+
+/* */
+static const char * const cs_path_attr_prefixes[CS_MAX_MAC_INDEX][2][2] = {
+	CS_EVERY_MAC(CS_PATH_ATTR_PREFIXES_ROW)
+};
+
+#undef CS_PATH_ATTR_PREFIXES_ROW
+#undef CS_PATH_ATTR_PREFIXES_ENTRY
+#undef CS_PATH_ATTR_PREFIXES_ENTRY_EXP
+
+
+/* index, attr, type, avail_self, avail_parent */  
+#define CS_EVERY_PATH_ATTR_FLAG(a)																						\
+	a(CS_PATH_ATTRIBUTE_TYPE, "type", CS_TYPE_FILETYPE, CS_PATH_ATTR_SELF_OK, 0)										\
+	a(CS_PATH_ATTRIBUTE_UID, "uid", CS_TYPE_NUMBER, CS_PATH_ATTR_SELF_OK, CS_PATH_ATTR_PARENT_OK)						\
+	a(CS_PATH_ATTRIBUTE_GID, "gid", CS_TYPE_NUMBER, CS_PATH_ATTR_SELF_OK, CS_PATH_ATTR_PARENT_OK)						\
+	a(CS_PATH_ATTRIBUTE_INO, "ino", CS_TYPE_NUMBER, CS_PATH_ATTR_SELF_OK, CS_PATH_ATTR_PARENT_OK)						\
+	a(CS_PATH_ATTRIBUTE_MAJOR, "major", CS_TYPE_NUMBER, CS_PATH_ATTR_SELF_OK, CS_PATH_ATTR_PARENT_OK)					\
+	a(CS_PATH_ATTRIBUTE_MINOR, "minor", CS_TYPE_NUMBER, CS_PATH_ATTR_SELF_OK, CS_PATH_ATTR_PARENT_OK)					\
+	a(CS_PATH_ATTRIBUTE_PERM, "perm", CS_TYPE_FILEPERM, CS_PATH_ATTR_SELF_OK, CS_PATH_ATTR_PARENT_OK)					\
+	a(CS_PATH_ATTRIBUTE_FSMAGIC,   "fsmagic",   CS_TYPE_NUMBER, CS_PATH_ATTR_SELF_OK, CS_PATH_ATTR_PARENT_OK)			\
+	a(CS_PATH_ATTRIBUTE_DEV_MAJOR, "dev_major", CS_TYPE_NUMBER, CS_PATH_ATTR_SELF_OK, 0)	\
+	a(CS_PATH_ATTRIBUTE_DEV_MINOR, "dev_minor", CS_TYPE_NUMBER, CS_PATH_ATTR_SELF_OK, 0)
+
+
+/* */
+#define CS_PATH_ATTRS_ROW(idx, attr, __unused_a, __unused_b, __unused_c) [idx] = attr,
+
+static const char * const cs_path_attrs[CS_MAX_PATH_ATTRIBUTE] = {
+	CS_EVERY_PATH_ATTR_FLAG(CS_PATH_ATTRS_ROW)
+};
+
+#undef CS_PATH_ATTRS_ROW
+
 
 /***** SECTION2: Structure definition *****/
 
@@ -1871,12 +1393,11 @@ static const struct cs_xattr_prefix cs_xattr_prefixes[] = {
 
 
 static enum cs_conditions_index cs_parse_lefthand_try_xattr(char *word, const enum cs_mac_index mac, struct cs_cond_tmp *tmp){
-	unsigned int i;
 
-	for (i=0; i < ARRAY_SIZE(cs_xattr_prefixes); i++){
+	for (unsigned int i=0; i < ARRAY_SIZE(cs_xattr_prefixes); i++){
 		const struct cs_xattr_prefix *p = &cs_xattr_prefixes[i];
 		const size_t p_len = strlen(p->prefix);
-		bool is_parent = false;
+		bool parent = false;
 		char *rest;
 
 		if (strncmp(word, p->prefix, p_len)) continue;
@@ -1884,12 +1405,12 @@ static enum cs_conditions_index cs_parse_lefthand_try_xattr(char *word, const en
 		rest = word + p_len;
 		if (!strncmp(rest, "parent.xattr[\"", 14)){
 			rest += 14;
-			is_parent = true;
+			parent = true;
 		} else if (!strncmp(rest, "xattr[\"", 7)){
 			rest += 7;
 		} else continue;
 		
-		const u64 avail = is_parent ? p->available_parent : p->available_self;
+		const u64 avail = parent ? p->available_parent : p->available_self;
 		if (!(avail & F(mac))) 
 			break;
 			
@@ -1909,18 +1430,17 @@ static enum cs_conditions_index cs_parse_lefthand_try_xattr(char *word, const en
 		tmp->type = CS_TYPE_STRING;
 
 		
-		return is_parent ? p->parent_idx : p->self_idx;
+		return parent ? p->parent_idx : p->self_idx;
 	}
 	return CS_INVALID_CONDITION;
 }
 
 // TODO docs
 static const char *cs_print_path_xattr_prefix(const enum cs_mac_index mac, const enum cs_conditions_index idx){
-	unsigned int i;
 	const bool is_parent = (idx == CS_XATTR_PARENT_ENTRY ||
 							idx == CS_XATTR2_PARENT_ENTRY);
 	
-	for (i=0; i<ARRAY_SIZE(cs_xattr_prefixes); i++){
+	for (unsigned int i=0; i < ARRAY_SIZE(cs_xattr_prefixes); i++){
 		const struct cs_xattr_prefix *p = &cs_xattr_prefixes[i];
 		const u64 avail = is_parent	? p->available_parent 
 									: p->available_self;
@@ -1933,6 +1453,84 @@ static const char *cs_print_path_xattr_prefix(const enum cs_mac_index mac, const
 
 	return "unknown"; /* This should not happen. */
 }
+
+
+
+
+
+
+static enum cs_conditions_index cs_parse_lefthand_try_pathattr(char *word, const enum cs_mac_index mac, struct cs_cond_tmp *tmp)  
+{  
+	const char *attr = NULL;
+	bool parent = false;
+	u8 slot = 0;
+	u64 avail = 0;
+  
+	#define CS_TRY_PREFIX__(prefix_, slot_, avail_self_, avail_parent_)		\
+		if (!strncmp(word, prefix_, sizeof(prefix_) - 1)) { 				\
+			attr = word + sizeof(prefix_) - 1;     							\
+			slot = (slot_);                      							\
+			if (!strncmp(attr, "parent.", 7)) {								\
+				attr += 7;                 									\
+				parent = true;            									\
+				avail = (avail_parent_) & F(mac);  							\
+			}                                    							\
+			else avail = (avail_self_) & F(mac);							\
+			goto found;                          							\
+		}  
+
+	CS_EVERY_PATH_ATTR_PREFIX(CS_TRY_PREFIX__)
+	#undef CS_TRY_PREFIX__
+
+	return CS_INVALID_CONDITION;
+
+found:
+	if (!avail)
+		return CS_INVALID_CONDITION;
+
+	#define CS_TRY_ATTR__(idx_, attr_, type_, avail_self_, avail_parent_)			\
+		if (!strcmp(attr, attr_)) {                         						\
+			if (avail & (parent ? avail_parent_ : avail_self_)) {					\
+				tmp->type = type_; 													\
+				return CS_PATH_ATTRIBUTE_START + slot + (parent ? 16 : 0) + idx_;	\
+			}																		\
+		}
+
+	CS_EVERY_PATH_ATTR_FLAG(CS_TRY_ATTR__);
+	#undef CS_TRY_ATTR__
+
+	return CS_INVALID_CONDITION;
+}
+
+
+static void cs_print_path_attr(struct cs_io_buffer *head, const enum cs_mac_index mac, const enum cs_conditions_index idx)  
+{  
+	const u8 attr_idx = idx - CS_PATH_ATTRIBUTE_START;  
+	const u8 is_parent = (attr_idx >> 4) & 1;
+	const u8 path_slot = attr_idx >> 5;
+	
+	const char *prefix = cs_path_attr_prefixes[mac][path_slot][is_parent];  
+
+	const u8 attr = attr_idx & 0xF;
+  
+	if (!prefix) {  
+		cs_set_string(head, "unknown"); /* This should not happen */  
+		return;  
+	}  
+	cs_set_string(head, prefix);  
+	if (is_parent)  
+		cs_set_string(head, "parent.");  
+	cs_set_string(head, cs_path_attrs[attr]);
+}
+
+
+
+
+
+
+
+
+
 
 // TODO docs
 static inline int cs_print_map_prot(const int ret, char *buf, int len, const unsigned long prot)
@@ -1983,6 +1581,7 @@ static inline const char *cs_print_map_mprotect_hint(const bool mprotect) {
 static enum cs_conditions_index cs_parse_lefthand
 (char *word, const enum cs_mac_index mac, struct cs_cond_tmp *tmp)
 {
+	
 
 	if (mac == CS_MAC_EXECUTE || mac == CS_MAC_ENVIRON) {
 		tmp->type = CS_TYPE_STRING;
@@ -2002,11 +1601,13 @@ static enum cs_conditions_index cs_parse_lefthand
 			}
 		}
 	}
-	enum cs_conditions_index idx = cs_parse_lefthand_try_xattr(word, mac, tmp);
-	if (idx != CS_INVALID_CONDITION) return idx;
 
+	enum cs_conditions_index ret = cs_parse_lefthand_try_xattr(word, mac, tmp);
+	if (ret != CS_INVALID_CONDITION)
+		return ret;
 	
-	return CS_INVALID_CONDITION;
+	
+	return cs_parse_lefthand_try_pathattr(word, mac, tmp);
 }
 
 /**
@@ -2732,6 +2333,11 @@ static bool cs_print_condition_loop(struct cs_io_buffer *head,
 			cs_set_string(head, "\"]");
 			break;
 		default:
+			if (left >= CS_PATH_ATTRIBUTE_START) {
+				cs_print_path_attr(head, type, left);
+				break;
+			}
+
 			cs_set_string(head, cs_condword(type, left));
 		}
 		cs_set_string(head, is_not ? "!=" : "=");

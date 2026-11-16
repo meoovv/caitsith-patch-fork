@@ -350,7 +350,7 @@ enum cs_group_id {
 	CS_MAX_GROUP
 } __packed;
 
-#define CS_EVERY_MAC(a)															\
+#define CS_TABLE_MAC(a)															\
 	a(CS_MAC_EXECUTE,		"execute")											\
 	a(CS_MAC_READ, 			"read")												\
 	a(CS_MAC_MAP,			"map")												\

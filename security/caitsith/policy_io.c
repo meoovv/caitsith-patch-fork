@@ -16,22 +16,13 @@
 #ifdef DEBUG_CONDITION
 #define dprintk printk
 #else
-#define dprintk(...) do { } while (0)
+#define dprintk(...)
 #endif
 
-static const char * const cs_memory_target2name[CS_MAX_MEMORY_TARGET] = {
-	[CS_MEMORY_NONE] = "0",
-	[CS_MEMORY_STACK] = "mem_stack",
-	[CS_MEMORY_HEAP] = "mem_heap",
-	[CS_MEMORY_OTHER] = "mem",	
-	[CS_MEMORY_OTHER_COW] = "mem_cow",	
-};
-
-
-/* Fill string table for operations from CS_EVERY_MAC */
+/* Fill string table for operations from CS_TABLE_MAC */
 #define CS_MAC_KEYWORDS_ROW(mac, keyword) [mac] = keyword,
 	static const char * const cs_mac_keywords[CS_MAX_MAC_INDEX] = {
-		CS_EVERY_MAC(CS_MAC_KEYWORDS_ROW)
+		CS_TABLE_MAC(CS_MAC_KEYWORDS_ROW)
 	};
 #undef CS_MAC_KEYWORDS_ROW
 
@@ -51,10 +42,19 @@ static const char * const cs_memory_headers[CS_MAX_MEMORY_STAT] = {
 	[CS_MEMORY_QUERY]  = "query",
 };
 
+/* String table for map* memory targets */
+static const char * const cs_memory_target2name[CS_MAX_MEMORY_TARGET] = {
+	[CS_MEMORY_NONE] = "0",
+	[CS_MEMORY_STACK] = "mem_stack",
+	[CS_MEMORY_HEAP] = "mem_heap",
+	[CS_MEMORY_OTHER] = "mem",	
+	[CS_MEMORY_OTHER_COW] = "mem_cow",	
+};
+
 #define F(bit) (1ULL << bit)
 
 #define CS_ALL_OK_EXP(mac, __unused) F(mac) |
-#define CS_ALL_OK (CS_EVERY_MAC(CS_ALL_OK_EXP) 0ULL)
+#define CS_ALL_OK (CS_TABLE_MAC(CS_ALL_OK_EXP) 0ULL)
 
 #define CS_PATH_SELF_OK				\
 	(F(CS_MAC_EXECUTE) |			\
@@ -149,8 +149,8 @@ static const struct {
 	const u64 available;
 } cs_conditions[] = {
 	// TODO: move on
-	{ "acl_group", CS_TYPE_ASSIGN, CS_TYPE_INVALID, CS_ACL_GROUP, F(CS_MAC_EXECUTE) },
-	{ "task.acl_group", CS_TYPE_STRING, CS_TYPE_STRING, CS_SELF_ACL_GROUP, CS_ALL_OK },
+	// TODO: rename CS_ACL_GROUP and others accordingly
+	{ "trans_attr", CS_TYPE_ASSIGN, CS_TYPE_INVALID, CS_ACL_GROUP, F(CS_MAC_EXECUTE) },
 	// TODO: move on
 	{ "prot", CS_TYPE_FILEPERM, CS_TYPE_FILEPERM, CS_COND_NARG1, F(CS_MAC_MAP) | F(CS_MAC_MAP_ANON) },
 	{ "prot_read", CS_TYPE_INVALID, CS_TYPE_FILEPERM, CS_MEMPROT_READ, CS_ALL_OK },
@@ -259,6 +259,9 @@ static const struct {
 	  CS_OBJ_IS_SYMLINK,        CS_ALL_OK },
 	{ "task.domain",             CS_TYPE_STRING,   CS_TYPE_STRING,
 	  CS_SELF_DOMAIN,           CS_ALL_OK },
+	// TODO: rename CS_ACL_GROUP and others accordingly
+	{ "task.domain_attr", CS_TYPE_STRING, CS_TYPE_STRING,
+	   CS_SELF_ACL_GROUP, CS_ALL_OK },
 	{ "task.egid",               CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_SELF_EGID,             CS_ALL_OK },
 	{ "task.euid",               CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
@@ -283,10 +286,13 @@ static const struct {
 	  CS_TASK_TYPE,             CS_ALL_OK },
 	{ "task.uid",                CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_SELF_UID,              CS_ALL_OK },
-	{ "transition",              CS_TYPE_ASSIGN,   CS_TYPE_INVALID,
+	{ "trans",              CS_TYPE_ASSIGN,   CS_TYPE_INVALID,
 	  CS_TRANSIT_DOMAIN,
 	  F(CS_MAC_EXECUTE) | F(CS_MAC_AUTO_DOMAIN_TRANSITION) |
 	  CS_INET_SOCKET_OK | CS_UNIX_SOCKET_OK },
+	// TODO: rename CS_ACL_GROUP and others accordingly
+	// XXX why dont we support sape op list as "trans" ?
+	{ "trans_attr", CS_TYPE_ASSIGN, CS_TYPE_INVALID, CS_ACL_GROUP, F(CS_MAC_EXECUTE) },
 	{ "uid",                     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,
 	  CS_COND_NARG0,            F(CS_MAC_CHOWN) },
 	{ "value",                   CS_TYPE_STRING,   CS_TYPE_STRING,
@@ -303,7 +309,7 @@ static const struct {
 #define CS_PATH_ATTR_SELF_OK_BUT(but) CS_PATH_ATTR_OK_BUT(CS_PATH_ATTR_SELF_OK, but)
 
 /* prefix, path slot, avail_self, avail_parent */
-#define CS_EVERY_PATH_ATTR_PREFIX(a, ...)															\
+#define CS_TABLE_PATH_ATTR_PREFIX(a, ...)															\
 	a("path.",     0,  CS_PATH_SELF_OK, CS_PATH_OK, ##__VA_ARGS__)										\
 	a("exec.",     32, CS_EXECUTE_OR_ENVIRON_OK, CS_EXECUTE_OR_ENVIRON_OK, ##__VA_ARGS__)				\
 	a("old_path.", 0,  CS_RENAME_OR_LINK_OK, CS_RENAME_OR_LINK_OK, ##__VA_ARGS__)						\
@@ -320,7 +326,7 @@ static const struct {
 
 
 
-#define CS_PATH_ATTR_PREFIXES_ENTRY(Mac, Path_num, Parent) CS_EVERY_PATH_ATTR_PREFIX(CS_PATH_ATTR_PREFIXES_ENTRY_EXP, Mac, Path_num, Parent) NULL
+#define CS_PATH_ATTR_PREFIXES_ENTRY(Mac, Path_num, Parent) CS_TABLE_PATH_ATTR_PREFIX(CS_PATH_ATTR_PREFIXES_ENTRY_EXP, Mac, Path_num, Parent) NULL
 	
 #define CS_PATH_ATTR_PREFIXES_ROW(mac, __unused)													\
 	[mac] = {																							\
@@ -330,7 +336,7 @@ static const struct {
 
 /* */
 static const char * const cs_path_attr_prefixes[CS_MAX_MAC_INDEX][2][2] = {
-	CS_EVERY_MAC(CS_PATH_ATTR_PREFIXES_ROW)
+	CS_TABLE_MAC(CS_PATH_ATTR_PREFIXES_ROW)
 };
 
 #undef CS_PATH_ATTR_PREFIXES_ROW
@@ -339,7 +345,7 @@ static const char * const cs_path_attr_prefixes[CS_MAX_MAC_INDEX][2][2] = {
 
 
 /* index, attr, type, avail_self, avail_parent */  
-#define CS_EVERY_PATH_ATTR_FLAG(a)																						\
+#define CS_TABLE_PATH_ATTR_FLAG(a)																						\
 	a(CS_PATH_ATTRIBUTE_TYPE, "type", CS_TYPE_FILETYPE, CS_PATH_ATTR_SELF_OK, 0)										\
 	a(CS_PATH_ATTRIBUTE_UID, "uid", CS_TYPE_NUMBER, CS_PATH_ATTR_SELF_OK, CS_PATH_ATTR_PARENT_OK)						\
 	a(CS_PATH_ATTRIBUTE_GID, "gid", CS_TYPE_NUMBER, CS_PATH_ATTR_SELF_OK, CS_PATH_ATTR_PARENT_OK)						\
@@ -356,7 +362,7 @@ static const char * const cs_path_attr_prefixes[CS_MAX_MAC_INDEX][2][2] = {
 #define CS_PATH_ATTRS_ROW(idx, attr, __unused_a, __unused_b, __unused_c) [idx] = attr,
 
 static const char * const cs_path_attrs[CS_MAX_PATH_ATTRIBUTE] = {
-	CS_EVERY_PATH_ATTR_FLAG(CS_PATH_ATTRS_ROW)
+	CS_TABLE_PATH_ATTR_FLAG(CS_PATH_ATTRS_ROW)
 };
 
 #undef CS_PATH_ATTRS_ROW
@@ -1479,7 +1485,7 @@ static enum cs_conditions_index cs_parse_lefthand_try_pathattr(char *word, const
 			goto found;                          							\
 		}  
 
-	CS_EVERY_PATH_ATTR_PREFIX(CS_TRY_PREFIX__)
+	CS_TABLE_PATH_ATTR_PREFIX(CS_TRY_PREFIX__)
 	#undef CS_TRY_PREFIX__
 
 	return CS_INVALID_CONDITION;
@@ -1496,7 +1502,7 @@ found:
 			}																		\
 		}
 
-	CS_EVERY_PATH_ATTR_FLAG(CS_TRY_ATTR__);
+	CS_TABLE_PATH_ATTR_FLAG(CS_TRY_ATTR__);
 	#undef CS_TRY_ATTR__
 
 	return CS_INVALID_CONDITION;

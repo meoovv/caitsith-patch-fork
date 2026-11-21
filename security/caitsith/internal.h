@@ -65,11 +65,15 @@
 #include <uapi/linux/mount.h>
 #endif
 
+#include <linux/kref.h>
+
 // XXX if path xattr support:
 #include <linux/xattr.h>
 
+// XXX if mem control support:
 #include <linux/mman.h>
 #include <linux/fs.h>
+
 
 
 #ifndef fallthrough
@@ -253,7 +257,7 @@ enum cs_conditions_index {
 				  *  CS_TASK_IS_EXECUTE_HANDLER
 				  */
 	CS_SELF_DOMAIN,
-	CS_SELF_ACL_GROUP,
+	CS_SELF_DOMAIN_ATTR,
 	CS_SELF_EXE,
 	CS_EXEC_ARGC,            /* "struct linux_binprm *"->argc */
 	CS_EXEC_ENVC,            /* "struct linux_binprm *"->envc */
@@ -287,7 +291,7 @@ enum cs_conditions_index {
 	CS_MEMTARG_OTHER_COW,
 	CS_TASK_EXECUTE_HANDLER, /* CS_TASK_IS_EXECUTE_HANDLER */
 	CS_HANDLER_PATH,
-	CS_ACL_GROUP,
+	CS_TRANSIT_DOMAIN_ATTR,
 	CS_TRANSIT_DOMAIN,
 	/* 40 */
 	CS_COND_SARG0,
@@ -427,9 +431,9 @@ enum cs_group_id {
 	)																		\
 
 #define CS_MAC_INDEX_ROW(mac, __unused) mac,
-	/* Fill enum with operation index numbers from CS_EVERY_MAC. */
+	/* Fill enum with operation index numbers from CS_TABLE_MAC. */
 	enum cs_mac_index {
-		CS_EVERY_MAC(CS_MAC_INDEX_ROW)
+		CS_TABLE_MAC(CS_MAC_INDEX_ROW)
 		CS_MAX_MAC_INDEX,
 		/* Map undefined functions to CS_MAX_MAC_INDEX */
 		#ifndef CONFIG_CAITSITH_GETATTR
@@ -525,7 +529,6 @@ enum cs_policy_id {
 	CS_ID_NAME,
 	CS_ID_ACL,
 	CS_ID_DOMAIN,
-	CS_ID_ACL_GROUPS,
 	CS_MAX_POLICY
 } __packed;
 
@@ -589,8 +592,8 @@ enum cs_value_type {
 #define CS_HASH_BITS 8
 #define CS_MAX_HASH (1u << CS_HASH_BITS)
 
-#define CS_MAX_ACL_GROUPS 60
-#define CS_ACL_GROUPS_INLINE 4
+#define CS_MAX_DOMAIN_ATTRS 60
+#define CS_MAX_DOMAIN_ATTRS_STATIC 4
 
 /* Bytes to pre-allocate when matching xattr value */
 #define CS_PATH_XATTR_VALUE_PREALLOC_SIZE 4096
@@ -660,7 +663,7 @@ struct cs_acl_info {
 };
 
 
-extern struct list_head cs_acl_groups_list;
+extern struct list_head cs_domain_attrs_list;
 
 /* Structure for "string_group"/"number_group"/"ip_group" directive. */
 struct cs_group {
@@ -782,7 +785,7 @@ struct cs_request_info {
 	struct {
 		struct linux_binprm *bprm;
 		struct cs_domain_info *previous_domain;
-		struct cs_acl_groups *previous_acl_groups;
+		struct cs_domain_attrs *previous_domain_attrs;
 		/* For execute_handler. */
 		char *handler; /* kstrdup(handler_path->name, GFP_NOFS) */
 		/* For dumping argv[] and envp[]. */
@@ -810,10 +813,10 @@ struct cs_request_info {
 	const struct cs_path_info *transition_candidate;
 
 
-	const struct cs_path_info *acl_group_candidates[CS_ACL_GROUPS_INLINE];
-	const struct cs_path_info **acl_group_candidates_ext;
-	u8 acl_group_count;
-	struct cs_acl_groups *acl_groups;
+	const struct cs_path_info *domain_attrs_candidates[CS_MAX_DOMAIN_ATTRS_STATIC];
+	const struct cs_path_info **domain_attrs_candidates_ext;
+	u8 domain_attr_count;
+	struct cs_domain_attrs *domain_attrs;
 
 
 	/*
@@ -847,8 +850,9 @@ struct cs_domain_info {
 	const struct cs_path_info *domainname;
 };
 
-struct cs_acl_groups {
-	struct cs_shared_acl_head head;
+struct cs_domain_attrs {
+	struct list_head list;
+	struct kref ref;
 	u8 len;
 	const struct cs_path_info *names[];	
 };
@@ -953,10 +957,9 @@ void cs_warn_oom(const char *function);
 
 //XXX
 void cs_clear_request_info(struct cs_request_info *r);
-void cs_kick_gc(void);
 bool cs_memory_ok(const void *ptr);
 
-
+void cs_release_domain_attrs(struct kref *ptr);
 
 /* Variable definition for internal use. */
 
@@ -1100,15 +1103,37 @@ static inline void cs_put_name(const struct cs_path_info *name)
 		atomic_dec(&container_of(name, struct cs_name, entry)->
 			   head.users);
 }
-
-
-static inline void cs_acl_groups_put(struct cs_acl_groups *g)  
+  
+/**
+ * cs_put_domain_attrs - Drop a reference on "struct cs_domain_attrs".
+ *
+ * @a: Pointer to "struct cs_domain_attrs". Maybe NULL.
+ *
+ * Must not run under cs_policy_lock - "cs_release_domain_attrs" is locking.
+ *
+ * Returns nothing.
+ */
+static inline void cs_put_domain_attrs(struct cs_domain_attrs *a)  
 {  
-	if (!g || !atomic_dec_and_test(&g->head.users))  
-		return;  
-	cs_kick_gc();
+	if (a)
+		kref_put(&a->ref, cs_release_domain_attrs);
 }
 
+/**  
+ * cs_take_domain_attrs - Take a reference on "struct cs_domain_attrs" via "kref_get".
+ *
+ * @a: Pointer to "struct cs_domain_attrs". Maybe NULL.
+ *
+ * "kref_get" contract applies.
+ *
+ * Returns @a for convenience.
+ */
+static inline struct cs_domain_attrs *cs_take_domain_attrs(struct cs_domain_attrs *a)  
+{  
+	if (a)  
+		kref_get(&a->ref);  
+	return a;  
+}  
 
 /* For importing variables and functions. */
 extern const struct caitsith_exports caitsith_exports;
@@ -1148,7 +1173,7 @@ struct cs_security {
 	struct list_head list;
 	const struct task_struct *task;
 	struct cs_domain_info *cs_domain_info;
-	struct cs_acl_groups *cs_acl_groups;
+	struct cs_domain_attrs *cs_domain_attrs;
 	u32 cs_flags;
 	struct rcu_head rcu;
 };

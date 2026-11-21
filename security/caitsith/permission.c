@@ -434,8 +434,8 @@ struct cs_domain_info cs_kernel_domain;
 /* The list for "struct cs_domain_info". */
 LIST_HEAD(cs_domain_list);
 
-
-LIST_HEAD(cs_acl_groups_list);
+/* The list for "struct cs_domain_attrs". */
+LIST_HEAD(cs_domain_attrs_list);
 
 /* The list for ACL policy. */
 struct list_head cs_acl_list[CS_MAX_MAC_INDEX];
@@ -445,63 +445,62 @@ struct cs_path_info cs_null_name;
 
 /***** SECTION6: Dependent functions section *****/
 /* 
-	SAFETY: invalid i and r are prevented in cs_acl_group_get():
-			!(acl_group_candidates_ext == NULL && i > 4) and !(i > CS_MAX_ACL_GROUPS) is forced  on
-			callee's side using acl_group_count which is forced to be less or equal to
-			CS_MAX_ACL_GROUP in cs_get_condition() and cs_condition()
+	SAFETY: invalid i and r are prevented in cs_domain_attrs_get():
+			!(domain_attrs_candidates_ext == NULL && i > 4) and !(i > CS_MAX_DOMAIN_ATTRS) are forced
+			on callee's side using domain_attrs_count which is forced to be less or equal to
+			CS_MAX_DOMAIN_ATTRS in cs_get_condition() and cs_condition()
 */
 // will give name from index i of request_info r
-static const struct cs_path_info *cs_acl_group_get_at(const struct cs_request_info *r, const u8 i) {  
-	return i < CS_ACL_GROUPS_INLINE  
-		? r->acl_group_candidates[i]  
-		: r->acl_group_candidates_ext[i - CS_ACL_GROUPS_INLINE];  
-}  
+static inline const struct cs_path_info *cs_domain_attr_get_at(const struct cs_request_info *r, const u8 i) {  
+	return i < CS_MAX_DOMAIN_ATTRS_STATIC
+		? r->domain_attrs_candidates[i]  
+		: r->domain_attrs_candidates_ext[i - CS_MAX_DOMAIN_ATTRS_STATIC];  
+}
 
-static struct cs_acl_groups *cs_acl_groups_get(const struct cs_request_info *r)  {  
-	const u8 n = r->acl_group_count;  
-	u8 i;
-	  
-	if (!n)  
+static struct cs_domain_attrs *cs_domain_attrs_get(const struct cs_request_info *r)  {  
+	const u8 count = r->domain_attr_count;
+	if (!count)
 		return NULL; 
 
-	struct cs_acl_groups *g;  
-	
-	mutex_lock(&cs_policy_lock); // guard against GC
+	/* Guard against GC while walking */
+	mutex_lock(&cs_policy_lock);
 
-	list_for_each_entry(g, &cs_acl_groups_list, head.list) {  
-		const int users = atomic_read(&g->head.users);
+	struct cs_domain_attrs *a;
+	/* Reuse an existing identical set for domain attributes if there's one */	
+	list_for_each_entry(a, &cs_domain_attrs_list, list) {
+		if (a->len != count) continue;
+		
+		u8 i;
+		for (i = 0; i < count && a->names[i] == cs_domain_attr_get_at(r, i); i++);
 
-		if (users == CS_GC_IN_PROGRESS || g->len != n)  
-			continue;  
-		for (i = 0; i < n && g->names[i] == cs_acl_group_get_at(r, i); i++)  
-			;  
-		if (i == n)  
-			goto exists;  
-	}  
-	g = kzalloc(sizeof(*g) + n * sizeof(g->names[0]), GFP_NOFS);  
-	if (!g) {
-		goto out;  
-	} else if (!cs_memory_ok(g)) {
-		// follow quotas	
-		kfree(g);
-		g = NULL;
+		if (i == count && kref_get_unless_zero(&a->ref))
+			goto out;
+	} 
+
+	/* Allocate new struct if theres nothing to reuse */
+	a = kzalloc(sizeof(*a) + count * sizeof(a->names[0]), GFP_NOFS);  
+	if (!a) goto out;
+
+	/* Respect memory quotas */
+	if (!cs_memory_ok(a)) {	
+		kfree(a);
+		a = NULL;
 		goto out;
 	}
-	// will be incremented in exists:
-	atomic_set(&g->head.users, 0);  
-	g->len = n;  
-	for (i = 0; i < n; i++) {  
-		g->names[i] = cs_acl_group_get_at(r, i);  
-		// inline only once
-		atomic_inc(&container_of(g->names[i], struct cs_name, entry)->head.users);  
+
+	kref_init(&a->ref);
+	a->len = count;
+
+	for (u8 i = 0; i < count; i++) {  
+		a->names[i] = cs_domain_attr_get_at(r, i);  
+		atomic_inc(&container_of(a->names[i], struct cs_name, entry)->head.users);  
 	}  
-	list_add_rcu(&g->head.list, &cs_acl_groups_list);  
-	// falls to exists: 
-exists:
-	atomic_inc(&g->head.users);  
+
+	list_add(&a->list, &cs_domain_attrs_list);  
+
 out:  
 	mutex_unlock(&cs_policy_lock);  
-	return g;  
+	return a;
 }
 
 
@@ -609,7 +608,7 @@ retry:
 					 srcu_read_lock_held(&cs_ss)) {
 			r->transition_candidate = NULL;
 			r->handler_path_candidate = NULL;
-			r->acl_group_count = 0;
+			r->domain_attr_count = 0;
 			if (!cs_check_entry(r, ptr2)) {
 				if (unlikely(r->failed_by_oom))
 					goto oom;
@@ -629,9 +628,10 @@ retry:
 			// Set the first matching acl groups entry
 			// TODO: should be reworked like domains and execute handlers. we should set persistant field there and do allocation in cs_execute.
 			// XXX rnt those already the same? get() unites candidates and group_count acts as marker of presence.
-			if (r->acl_group_count && !r->acl_groups) {
-				r->acl_groups = cs_acl_groups_get(r);
-				if (!r->acl_groups) goto oom;
+			if (r->domain_attr_count && !r->domain_attrs) {
+				r->domain_attrs = cs_domain_attrs_get(r);
+				if (unlikely(!r->domain_attrs))
+					goto oom;
 			}
 			break;
 
@@ -751,11 +751,11 @@ static int cs_execute(struct cs_request_info *r)
 	 */
 	current_sec->cs_flags |= CS_TASK_IS_IN_EXECVE;
 
-	if (r->acl_groups) {
-		if (current_sec->cs_acl_groups)
-			cs_acl_groups_put(current_sec->cs_acl_groups);
-		current_sec->cs_acl_groups = r->acl_groups;
-		r->acl_groups = NULL; 
+	if (r->domain_attrs) {
+		if (current_sec->cs_domain_attrs)
+			cs_put_domain_attrs(current_sec->cs_domain_attrs);
+		current_sec->cs_domain_attrs = r->domain_attrs;
+		r->domain_attrs = NULL; 
 	}
 }
 
@@ -1182,9 +1182,7 @@ static int cs_start_execve(struct linux_binprm *bprm,
 	idx = cs_read_lock();
 	/* r->dump->data is allocated by cs_dump_page(). */
 	r->previous_domain = task->cs_domain_info;
-	r->previous_acl_groups = task->cs_acl_groups;
-	if(r->previous_acl_groups)
-		atomic_inc(&r->previous_acl_groups->head.users);
+	r->previous_domain_attrs = cs_take_domain_attrs(task->cs_domain_attrs);
 	/* Clear manager flag. */
 	task->cs_flags &= ~CS_TASK_IS_MANAGER;
 	*rp = r;
@@ -1225,8 +1223,8 @@ static void cs_finish_execve(int retval, struct cs_request_info *r)
 		return;
 	task = cs_current_security();
 	if (retval < 0) {
-		cs_acl_groups_put(task->cs_acl_groups);
-		task->cs_acl_groups = r->previous_acl_groups; 
+		cs_put_domain_attrs(task->cs_domain_attrs);
+		task->cs_domain_attrs = r->previous_domain_attrs; 
 
 		task->cs_domain_info = r->previous_domain;
 		/*
@@ -1235,7 +1233,7 @@ static void cs_finish_execve(int retval, struct cs_request_info *r)
 		 */
 		smp_wmb();
 	} else {
-		cs_acl_groups_put(r->previous_acl_groups);
+		cs_put_domain_attrs(r->previous_domain_attrs);
 
 		/* Mark the current process as execute handler. */
 		if (r->handler)
@@ -1740,7 +1738,13 @@ static int cs_old_open_permission(struct dentry *dentry, struct vfsmount *mnt,
 
 #endif
 
-// TODO docs
+/**
+ * cs_mmap_addr_permission - Check permission for "use_map_low".
+ *
+ * @addr: Memory address being mapped.
+ *
+ * Returns 0 on success, negative value otherwise.
+ */
 static int cs_mmap_addr_permission(const unsigned long addr) {
 
 	int error = 0;
@@ -1755,7 +1759,15 @@ static int cs_mmap_addr_permission(const unsigned long addr) {
 	return error;
 }
 
-
+/**
+ * cs_mmap_file_shared_acl - Check "read"/"write"/"execute" permissions for shared file "map".
+ *
+ * @path: Path being checked.
+ * @prot: Value of "prot=".
+ * @mprotect: Whether this operation is mprotect.
+ *
+ * Returns 0 on success, negative value otherwise.
+ */
 static inline int cs_mmap_file_shared_acl(const struct path path, const unsigned long prot, const bool mprotect)
 {
 	int error = 0;
@@ -1782,7 +1794,18 @@ static inline int cs_mmap_file_shared_acl(const struct path path, const unsigned
 	return error;
 } 
 
-// TODO docs
+/**
+ * cs_mmap_acl - Check permission for "map" and "map_anon".
+ *
+ * @file: File being checked, NULL for anonymous mmap/mprotect.
+ * @user_file: User-facing file being checked, NULL for non-backing @file.
+ * @mprotect: Whether this operation is mprotect.
+ * @shared: Whether this operation is shared mmap/mprotect.
+ * @prot: Value of "prot=".
+ * @vma_target: Value of "vma=".
+ *
+ * Returns 0 on success, negative value otherwise.
+ */
 static int cs_mmap_acl(const struct file *file, 
 						const struct path *user_file_path,
 						const bool mprotect,
@@ -1832,7 +1855,15 @@ check:
 }
 
 
-/* vma->vm_file is always mapped to backing_file here */
+/**
+ * cs_mmap_backing_file_permission - Check "map"/"map_anon" permissions for file-backed mmap/mprotect on overlay filesystems.
+ *
+ * @vma: Ready vma_area_struct, @vma->vm_file is always mapped to backing file.
+ * @backing_file: Backing file.
+ * @backing_file: User-facing file.
+ *
+ * Returns 0 on success, negative value otherwise.
+ */
 static int cs_mmap_backing_file_permission(const struct vm_area_struct *vma, const struct file *backing_file, const struct file *user_file)
 {
 	unsigned long prot = 0;
@@ -1849,10 +1880,20 @@ static int cs_mmap_backing_file_permission(const struct vm_area_struct *vma, con
 						prot, CS_MEMORY_OTHER); 
 }
 
+
 /*  
 	XXX 7.x-kernel-specific, older kernels had different signature. 
 	we could pass "reqprot" there in lsm2caitsith  for older kernels 
 */
+/**
+ * cs_mmap_file_permission - Check "map"/"map_anon" permissions for mmap/mprotect.
+ *
+ * @file: File being checked. Maybe NULL.
+ * @prot: Value of "prot=".
+ * @flags: Flags for this mmap/mprotect.
+ *
+ * Returns 0 on success, negative value otherwise.
+ */
 static int cs_mmap_file_permission(const struct file *file, unsigned long prot, unsigned long flags)
 {	
 	const unsigned long type = flags & MAP_TYPE;
@@ -1863,10 +1904,18 @@ static int cs_mmap_file_permission(const struct file *file, unsigned long prot, 
 						prot, CS_MEMORY_OTHER);
 }
 
-// TODO: special case for READ_IMPLIES_EXEC systems?
+/**
+ * cs_file_mprotect_permission - Check "map"/"map_anon" permissions for mprotect on overlay filesystems.
+ *								 No special-casing for READ_IMPLIES_EXEC systems.
+ *
+ * @vma: Ready vma_area_struct, @vma->vm_file is always mapped to backing file.
+ * @prot: Value of "prot=".
+ *
+ * Returns 0 on success, negative value otherwise.
+ */
 static int cs_file_mprotect_permission(const struct vm_area_struct *vma, const unsigned long reqprot __always_unused, const unsigned long prot)
 {
-	const bool will_set_exec = (prot & PROT_EXEC) && !(vma->vm_flags & VM_EXEC);
+	const bool adding_exec = (prot & PROT_EXEC) && !(vma->vm_flags & VM_EXEC);
 
 	const struct file *file = vma->vm_file;
 	const struct path *user_file_path = NULL;
@@ -1877,21 +1926,21 @@ static int cs_file_mprotect_permission(const struct vm_area_struct *vma, const u
 	/* 
 		Available values for vma_target:
 			file mprotect: CS_MEMORY_OTHER_COW
-			anonymous exec mprotect: CS_MEMORY_STACK, CS_MEMORY_HEAP
+			anonymous +X mprotect: CS_MEMORY_STACK, CS_MEMORY_HEAP
 			both: CS_MEMORY_OTHER
-			anonymous non-exec mprotect: none
+			anonymous non-+X mprotect: none
 	*/
 	if (file) {
 		// XXX FMODE_BACKING is 6.7+
 		user_file_path = (file->f_mode & FMODE_BACKING) ? backing_file_user_path(file) : NULL;
 		
-		if (will_set_exec) {
+		if (adding_exec) {
 			if (vma->anon_vma) vma_target = CS_MEMORY_OTHER_COW;
 			else vma_target = CS_MEMORY_OTHER;
 		}
 	} else {
 		/* Only expose vma_target for anonymous mprotect on +X */
-		if (will_set_exec) {
+		if (adding_exec) {
 			/*	
 				We're not using vm_is_initial_heap() because its broken on no-heap systems. 
 				See security/selinux/hooks.c for details 
@@ -3804,10 +3853,10 @@ static bool cs_cond2arg(struct cs_cond_arg *arg,
 	case CS_COND_NARG2:
 		value = param->i[2];
 		break;
-	case CS_ACL_GROUP:
-	case CS_SELF_ACL_GROUP:
 	case CS_HANDLER_PATH:
 	case CS_TRANSIT_DOMAIN:
+	case CS_TRANSIT_DOMAIN_ATTR:
+	case CS_SELF_DOMAIN_ATTR:
 	case CS_COND_IPARG:
 		/* Values are loaded by caller. Just return a dummy. */
 		arg->type = CS_ARG_TYPE_NONE;
@@ -4145,10 +4194,7 @@ static bool cs_condition(struct cs_request_info *r,
 			r->handler_path_candidate = right.name;
 			continue;
 		}
-		if (left_op == CS_SELF_ACL_GROUP) {
-			const struct cs_acl_groups *g = cs_current_security()->cs_acl_groups;
-			u8 i;
-			bool found = false;
+		if (left_op == CS_SELF_DOMAIN_ATTR) {
 
 			if (right.type == CS_ARG_TYPE_NAME)
 				right.group = NULL;
@@ -4157,45 +4203,42 @@ static bool cs_condition(struct cs_request_info *r,
 			else
 				return false;
 
-			printk(KERN_INFO "CaitSith: SELF_ACL_GROUP: begin\n");
+			const struct cs_domain_attrs *a = cs_current_security()->cs_domain_attrs;
+			bool found = false;
 
-			for (i=0; g && i < g->len; i++) {
-				printk(KERN_INFO "CaitSith: SELF_ACL_GROUP: going through acl group: %hhu\n", i);
-				if (cs_path_matches_group_or_pattern(g->names[i], right.group, right.name, true)) {
+			for (u8 i = 0; a && i < a->len; i++) {
+				if (cs_path_matches_group_or_pattern(a->names[i], right.group, right.name, true)) {
 					found = true;
 					break;
 				}
 			} 
-			if (found == match) {
-				printk(KERN_INFO "CaitSith: SELF_ACL_GROUP: match!");
-				continue;
-			}
+			if (found == match) continue;
 			return false;
 		}
 		if (left_op == CS_TRANSIT_DOMAIN) {
 			r->transition_candidate = right.name;
 			continue;
 		}
-		if (left_op == CS_ACL_GROUP) {
-			const u8 n = r->acl_group_count;
+		if (left_op == CS_TRANSIT_DOMAIN_ATTR) {
+			const u8 count = r->domain_attr_count;
 
-			if (n >= CS_MAX_ACL_GROUPS)
+			if (count >= CS_MAX_DOMAIN_ATTRS)
 				return false;
-			if (n < CS_ACL_GROUPS_INLINE) {
-				r->acl_group_candidates[n] = right.name;
+			if (count < CS_MAX_DOMAIN_ATTRS_STATIC) {
+				r->domain_attrs_candidates[count] = right.name;
 			} else {
-				if (!r->acl_group_candidates_ext) {
-					r->acl_group_candidates_ext = kcalloc(CS_MAX_ACL_GROUPS - CS_ACL_GROUPS_INLINE, 
-														sizeof(*r->acl_group_candidates_ext),
+				if (!r->domain_attrs_candidates_ext) {
+					r->domain_attrs_candidates_ext = kcalloc(CS_MAX_DOMAIN_ATTRS - CS_MAX_DOMAIN_ATTRS_STATIC, 
+														sizeof(*r->domain_attrs_candidates_ext),
 														GFP_NOFS);
-					if (!r->acl_group_candidates_ext) {
+					if (!r->domain_attrs_candidates_ext) {
 						r->failed_by_oom = true;
 						return false;
 					}
 				}
-				r->acl_group_candidates_ext[n - CS_ACL_GROUPS_INLINE] = right.name;
+				r->domain_attrs_candidates_ext[count - CS_MAX_DOMAIN_ATTRS_STATIC] = right.name;
 			}
-			r->acl_group_count++;
+			r->domain_attr_count++;
 			continue;
 		}
 		return false;
@@ -4531,9 +4574,9 @@ void cs_clear_request_info(struct cs_request_info *r)
 	kfree(r->exename.name);
 	r->exename.name = NULL;
 
-	cs_acl_groups_put(r->acl_groups);
-	r->acl_groups = NULL;
-	kfree(r->acl_group_candidates_ext);
-	r->acl_group_candidates_ext = NULL;
-	r->acl_group_count = 0;
+	cs_put_domain_attrs(r->domain_attrs);
+	r->domain_attrs = NULL;
+	kfree(r->domain_attrs_candidates_ext);
+	r->domain_attrs_candidates_ext = NULL;
+	r->domain_attr_count = 0;
 }

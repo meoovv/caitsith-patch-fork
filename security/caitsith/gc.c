@@ -240,14 +240,6 @@ static inline void cs_del_domain(struct list_head *element)
 	cs_put_name(domain->domainname);
 }
 
-
-static inline void cs_del_acl_groups(struct list_head *element) {
-	struct cs_acl_groups *g = container_of(element, typeof(*g), head.list);
-	u8 i;
-	for (i = 0; i < g->len; i++)
-		cs_put_name(g->names[i]);
-}
-
 /**
  * cs_del_string_group - Delete members in "struct cs_string_group".
  *
@@ -323,6 +315,31 @@ void cs_del_condition(struct list_head *element)
 	}
 }
 
+/**  
+ * cs_domain_attrs_release - Free "struct cs_domain_attrs" at refcount zero.  
+ *  
+ * @ref: Pointer to "struct kref" from "struct cs_domain_attrs".  
+ *  
+ * Called by final cs_put_domain_attrs(). XXX Unlinks from  
+ * cs_domain_attrs_list under cs_policy_lock, drops held name references,  
+ * adjusts memory quota, frees.
+ */  
+void cs_release_domain_attrs(struct kref *ptr)  
+{  
+	struct cs_domain_attrs *a = container_of(ptr, struct cs_domain_attrs, ref);
+  
+	mutex_lock(&cs_policy_lock);
+
+	list_del(&a->list);
+	cs_memory_used[CS_MEMORY_POLICY] -= cs_ksize(a);
+
+	mutex_unlock(&cs_policy_lock);
+  
+	for (u8 i = 0; i < a->len; i++)
+		cs_put_name(a->names[i]);
+	kfree(a);
+}
+
 /**
  * cs_try_to_gc - Try to kfree() an entry.
  *
@@ -386,9 +403,6 @@ static void cs_try_to_gc(const enum cs_policy_id type,
 				   list)->acl_info_list))
 			goto reinject;
 		cs_del_acl(element);
-		break;
-	case CS_ID_ACL_GROUPS:
-		cs_del_acl_groups(element);
 		break;
 	case CS_ID_DOMAIN:
 		/*
@@ -486,17 +500,6 @@ static void cs_collect_entry(void)
 				continue;
 			cs_try_to_gc(CS_ID_DOMAIN, &domain->list);
 		}
-	}
-	{  
-		struct cs_shared_acl_head *ptr;  
-		struct cs_shared_acl_head *tmp;
-  
-		list_for_each_entry_safe(ptr, tmp, &cs_acl_groups_list, list) {  
-			if (atomic_read(&ptr->users) > 0)  
-				continue;  
-			atomic_set(&ptr->users, CS_GC_IN_PROGRESS);  
-			cs_try_to_gc(CS_ID_ACL_GROUPS, &ptr->list);  
-		}  
 	}
 	for (i = 0; i < CS_MAX_MAC_INDEX; i++) {
 		struct cs_acl_info *ptr;
@@ -596,7 +599,8 @@ out:
 }
 
 
-void cs_kick_gc(void) {
+// TODO docs
+static void cs_kick_gc(void) {
 	struct task_struct *t = kthread_create(cs_gc_thread, NULL, "CaitSith's GC"); 
 	if (!IS_ERR(t))
 		wake_up_process(t); 
@@ -630,9 +634,6 @@ void cs_notify_gc(struct cs_io_buffer *head, const bool is_register)
 	}
 	spin_unlock(&cs_io_buffer_list_lock);
 	if (is_write) {
-		struct task_struct *task = kthread_create(cs_gc_thread, NULL,
-							  "CaitSith's GC");
-		if (!IS_ERR(task))
-			wake_up_process(task);
+		cs_kick_gc();
 	}
 }

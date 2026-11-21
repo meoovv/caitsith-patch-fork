@@ -81,9 +81,7 @@ static int cs_alloc_task_security(const struct task_struct *task)
 	new_security->cs_domain_info = old_security->cs_domain_info;
 	new_security->cs_flags = old_security->cs_flags;
 
-	new_security->cs_acl_groups = old_security->cs_acl_groups;
-	if (new_security->cs_acl_groups)
-		atomic_inc(&new_security->cs_acl_groups->head.users);
+	new_security->cs_domain_attrs = cs_take_domain_attrs(old_security->cs_domain_attrs);
 
 	cs_add_task_security(new_security, list);
 	return 0;
@@ -166,8 +164,7 @@ static void cs_free_task_security(const struct task_struct *task)
 	list_del_rcu(&ptr->list);
 	spin_unlock_irqrestore(&cs_task_security_list_lock, flags);
 
-	// free cs_acl_groups
-	cs_acl_groups_put(ptr->cs_acl_groups);
+	cs_put_domain_attrs(ptr->cs_domain_attrs);
 
 	call_rcu(&ptr->rcu, cs_rcu_free);
 }

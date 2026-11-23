@@ -241,10 +241,10 @@ static const struct {
 	  CS_TRANSIT_DOMAIN,  
 	  F(CS_MAC_EXECUTE) | F(CS_MAC_AUTO_DOMAIN_TRANSITION) |  
 	  CS_INET_SOCKET_OK | CS_UNIX_SOCKET_OK },  
-	// TODO: rename CS_ACL_GROUP and others accordingly  
-	// XXX why dont we support sape op list as "trans" ?  
 	{ "trans_attr", 			 CS_TYPE_ASSIGN, CS_TYPE_INVALID,
-	  CS_TRANSIT_DOMAIN_ATTR,				F(CS_MAC_EXECUTE) },  
+	  CS_TRANSIT_DOMAIN_ATTR,
+	  F(CS_MAC_EXECUTE) | F(CS_MAC_AUTO_DOMAIN_TRANSITION) |  
+	  CS_INET_SOCKET_OK | CS_UNIX_SOCKET_OK },  
 	{ "uid",                     CS_TYPE_NUMBER,   CS_TYPE_NUMBER,  
 	  CS_COND_NARG0,            F(CS_MAC_CHOWN) },  
 	{ "value",                   CS_TYPE_STRING,   CS_TYPE_STRING,  
@@ -753,6 +753,11 @@ static void cs_print_ip(struct cs_io_buffer *head,
 
 /* Lock for protecting policy. */
 DEFINE_MUTEX(cs_policy_lock);
+
+/* TODO */
+/* The list for "struct cs_domain_attrs". */
+struct list_head cs_domain_attrs_list[CS_MAX_HASH];
+spinlock_t cs_domain_attrs_lock[CS_MAX_HASH]; 
 
 /* Has /sbin/init started? */
 bool cs_policy_loaded;
@@ -1795,7 +1800,7 @@ static struct cs_condition *cs_get_condition(struct cs_io_buffer *head)
 	union cs_condition_element *condp;
 	struct cs_cond_tmp tmp;
 	const enum cs_mac_index type = head->w.acl_index;
-	u8 domain_attr_count = 0;
+	u8 domain_attrs_count = 0;
 #ifdef CONFIG_CAITSITH_EXECUTE_HANDLER
 	bool handler_path_done = head->w.is_deny ||
 		type != CS_MAC_EXECUTE;
@@ -1837,10 +1842,9 @@ static struct cs_condition *cs_get_condition(struct cs_io_buffer *head)
 		if (!cs_parse_cond(&tmp, head))
 			goto out;
 		if (tmp.left == CS_TRANSIT_DOMAIN_ATTR) {
-			if (head->w.is_deny) goto out;
-			// XXX could be just =
-			if (domain_attr_count >= CS_MAX_DOMAIN_ATTRS) goto out;
-			domain_attr_count++;
+			if (head->w.is_deny || domain_attrs_count == CS_MAX_DOMAIN_ATTRS)
+				goto out;
+			domain_attrs_count++;
 		}
 		if (tmp.left == CS_HANDLER_PATH) {
 			if (handler_path_done)
@@ -3807,6 +3811,21 @@ out:
 }
 
 /**
+ * cs_transit_domain_attrs - Switch current task's domain attribute set.
+ *
+ * @a: New "struct cs_domain_attrs". Maybe NULL (to reset attributes).
+ *
+ * Takes over the caller's reference on @a. Caller holds cs_read_lock().
+ */
+void cs_transit_domain_attrs(struct cs_domain_attrs *a)
+{
+	struct cs_security *security = cs_current_security();
+
+	cs_put_domain_attrs(security->cs_domain_attrs);
+	security->cs_domain_attrs = a;
+}
+
+/**
  * cs_parse_policy - Parse a policy line.
  *
  * @head: Pointer to "struct cs_io_buffer".
@@ -4442,6 +4461,11 @@ static int __init cs_init_module(void)
 		INIT_LIST_HEAD(&cs_group_list[idx]);
 	for (idx = 0; idx < CS_MAX_HASH; idx++)
 		INIT_LIST_HEAD(&cs_name_list[idx]);
+	//XXX if domain attrs?
+	for (idx = 0; idx < CS_MAX_HASH; idx++) {
+		INIT_LIST_HEAD(&cs_domain_attrs_list[idx]);
+		spin_lock_init(&cs_domain_attrs_lock[idx]);
+	}
 #ifdef CONFIG_CAITSITH_USE_EXTERNAL_TASK_SECURITY
 	cs_mm_init();
 #endif

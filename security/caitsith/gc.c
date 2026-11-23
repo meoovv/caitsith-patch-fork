@@ -320,22 +320,23 @@ void cs_del_condition(struct list_head *element)
  *  
  * @ref: Pointer to "struct kref" from "struct cs_domain_attrs".  
  *  
- * Called by final cs_put_domain_attrs(). XXX Unlinks from  
- * cs_domain_attrs_list under cs_policy_lock, drops held name references,  
+ * Called by final cs_put_domain_attrs(), atomic-safe. Unlinks from  
+ * cs_domain_attrs_list under per-name-list lock, drops held name references,  
  * adjusts memory quota, frees.
  */  
-void cs_release_domain_attrs(struct kref *ptr)  
-{  
+void cs_release_domain_attrs(struct kref *ptr)
+{
 	struct cs_domain_attrs *a = container_of(ptr, struct cs_domain_attrs, ref);
-  
-	mutex_lock(&cs_policy_lock);
+	spinlock_t *l = cs_get_domain_attrs_lock(a->names_hash);
+
+	spin_lock(l);
 
 	list_del(&a->list);
 	cs_memory_used[CS_MEMORY_POLICY] -= cs_ksize(a);
 
-	mutex_unlock(&cs_policy_lock);
-  
-	for (u8 i = 0; i < a->len; i++)
+	spin_unlock(l);
+
+	for (u8 i = 0; i < a->len; i++) 
 		cs_put_name(a->names[i]);
 	kfree(a);
 }

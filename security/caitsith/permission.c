@@ -434,9 +434,6 @@ struct cs_domain_info cs_kernel_domain;
 /* The list for "struct cs_domain_info". */
 LIST_HEAD(cs_domain_list);
 
-/* The list for "struct cs_domain_attrs". */
-LIST_HEAD(cs_domain_attrs_list);
-
 /* The list for ACL policy. */
 struct list_head cs_acl_list[CS_MAX_MAC_INDEX];
 
@@ -457,50 +454,81 @@ static inline const struct cs_path_info *cs_domain_attr_get_at(const struct cs_r
 		: r->domain_attrs_candidates_ext[i - CS_MAX_DOMAIN_ATTRS_STATIC];  
 }
 
+static inline u8 cs_domain_attrs_hash_names(const struct cs_request_info *r) {
+	const u8 count = r->domain_attrs_count;
+	u32 hash = count;
+
+	for (u8 i = 0; i < r->domain_attrs_count; i++)
+		hash = hash * 31 + cs_domain_attr_get_at(r, i)->hash;
+	return hash & (CS_MAX_HASH - 1);
+}
+
+/**  
+ * cs_domain_attrs_find - Find a matching set on a hash bucket.  
+ *  
+ * @r:      Pointer to "struct cs_request_info" holding candidates.  
+ * @hash:   Bucket index into cs_domain_attrs_list[].  
+ *  
+ * Returns a matching "struct cs_domain_attrs" with a reference taken,  
+ * or NULL. Caller holds cs_domain_attrs_lock[@hash].  
+ */  
+static struct cs_domain_attrs *cs_domain_attrs_find(const struct cs_request_info *r, const u8 hash)
+{  
+	const u8 count = r->domain_attrs_count;
+
+	struct cs_domain_attrs *a;    
+	list_for_each_entry(a, &cs_domain_attrs_list[hash], list) {  
+		if (a->len != count)
+			continue;
+
+		u8 i;
+		for (i = 0; i < count && a->names[i] == cs_domain_attr_get_at(r, i); i++)
+			;
+		if (i == count && kref_get_unless_zero(&a->ref))
+			return a;
+	}
+	return NULL;
+}  
+
 static struct cs_domain_attrs *cs_domain_attrs_get(const struct cs_request_info *r)  {  
-	const u8 count = r->domain_attr_count;
+	const u8 count = r->domain_attrs_count;
 	if (!count)
 		return NULL; 
-
-	/* Guard against GC while walking */
-	mutex_lock(&cs_policy_lock);
-
-	struct cs_domain_attrs *a;
-	/* Reuse an existing identical set for domain attributes if there's one */	
-	list_for_each_entry(a, &cs_domain_attrs_list, list) {
-		if (a->len != count) continue;
 		
-		u8 i;
-		for (i = 0; i < count && a->names[i] == cs_domain_attr_get_at(r, i); i++);
+	const u8 names_hash = cs_domain_attrs_hash_names(r);
+	spinlock_t *l = cs_get_domain_attrs_lock(names_hash);
+	struct cs_domain_attrs *a = NULL;
+	
+	spin_lock(l);
+	a = cs_domain_attrs_find(r, names_hash);
+	spin_unlock(l);
+	/* Return an existing identical attributes set for if there's one */	
+	if (a) return a;
 
-		if (i == count && kref_get_unless_zero(&a->ref))
-			goto out;
-	} 
+	/* Miss: allocate outside the lock (GFP_NOFS may sleep). */  
+	struct cs_domain_attrs *new = 
+		kzalloc(sizeof(*new) + count * sizeof(new->names[0]), GFP_NOFS);  
 
-	/* Allocate new struct if theres nothing to reuse */
-	a = kzalloc(sizeof(*a) + count * sizeof(a->names[0]), GFP_NOFS);  
-	if (!a) goto out;
-
-	/* Respect memory quotas */
-	if (!cs_memory_ok(a)) {	
-		kfree(a);
-		a = NULL;
-		goto out;
+	spin_lock(l);
+	a = cs_domain_attrs_find(r, names_hash);
+	/* Return NULL on OOM / quota exceeded or just appeared identical attributes set if there's one */
+	if (a || !cs_memory_ok(new)) {
+		spin_unlock(l);
+		kfree(new);
+		return a;
 	}
 
-	kref_init(&a->ref);
-	a->len = count;
-
+	kref_init(&new->ref);
+	new->len = count;
+	new->names_hash = names_hash;
 	for (u8 i = 0; i < count; i++) {  
-		a->names[i] = cs_domain_attr_get_at(r, i);  
-		atomic_inc(&container_of(a->names[i], struct cs_name, entry)->head.users);  
+		new->names[i] = cs_domain_attr_get_at(r, i);  
+		atomic_inc(&container_of(new->names[i], struct cs_name, entry)->head.users);  
 	}  
+	list_add(&new->list, &cs_domain_attrs_list[names_hash]);
 
-	list_add(&a->list, &cs_domain_attrs_list);  
-
-out:  
-	mutex_unlock(&cs_policy_lock);  
-	return a;
+	spin_unlock(l);
+	return new;
 }
 
 
@@ -608,7 +636,7 @@ retry:
 					 srcu_read_lock_held(&cs_ss)) {
 			r->transition_candidate = NULL;
 			r->handler_path_candidate = NULL;
-			r->domain_attr_count = 0;
+			r->domain_attrs_count = 0;
 			if (!cs_check_entry(r, ptr2)) {
 				if (unlikely(r->failed_by_oom))
 					goto oom;
@@ -628,7 +656,7 @@ retry:
 			// Set the first matching acl groups entry
 			// TODO: should be reworked like domains and execute handlers. we should set persistant field there and do allocation in cs_execute.
 			// XXX rnt those already the same? get() unites candidates and group_count acts as marker of presence.
-			if (r->domain_attr_count && !r->domain_attrs) {
+			if (r->domain_attrs_count && !r->domain_attrs) {
 				r->domain_attrs = cs_domain_attrs_get(r);
 				if (unlikely(!r->domain_attrs))
 					goto oom;
@@ -686,16 +714,17 @@ int cs_check_acl(struct cs_request_info *r, const bool clear)
 	const int idx = cs_read_lock();
 
 	error = cs_check_acl_list(r);
-	if (r->transition && r->result == CS_MATCHING_ALLOWED &&
-	    r->type != CS_MAC_EXECUTE &&
-	    !cs_transit_domain(r->transition->name)) {
-		printk(KERN_WARNING "ERROR: Unable to transit to '%s' domain.\n",
-		       r->transition->name);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 3, 0)
-		force_sig(SIGKILL, current);
-#else
-		force_sig(SIGKILL);
-#endif
+	if (r->result == CS_MATCHING_ALLOWED && r->type != CS_MAC_EXECUTE) {
+		if (r->transition && !cs_transit_domain(r->transition->name)) {
+			printk(KERN_WARNING "ERROR: Unable to transit to '%s' domain.\n", r->transition->name);
+			force_sig(SIGKILL);
+		}
+		// XXX domain_attrs is only materialized in retry: block in cs_check_acl_list. need to address when supporting reset via =NULL.
+		else if (r->domain_attrs) {
+			/* Ownership moves to the task, make sure cs_clear_request_info() won't drop it */
+			cs_transit_domain_attrs(r->domain_attrs);
+			r->domain_attrs = NULL;
+		}
 	}
 	cs_read_unlock(idx);
 	if (clear)
@@ -751,10 +780,8 @@ static int cs_execute(struct cs_request_info *r)
 	 */
 	current_sec->cs_flags |= CS_TASK_IS_IN_EXECVE;
 
-	if (r->domain_attrs) {
-		if (current_sec->cs_domain_attrs)
-			cs_put_domain_attrs(current_sec->cs_domain_attrs);
-		current_sec->cs_domain_attrs = r->domain_attrs;
+	if (r->domain_attrs_count) {
+		cs_transit_domain_attrs(r->domain_attrs);
 		r->domain_attrs = NULL; 
 	}
 }
@@ -4220,7 +4247,7 @@ static bool cs_condition(struct cs_request_info *r,
 			continue;
 		}
 		if (left_op == CS_TRANSIT_DOMAIN_ATTR) {
-			const u8 count = r->domain_attr_count;
+			const u8 count = r->domain_attrs_count;
 
 			if (count >= CS_MAX_DOMAIN_ATTRS)
 				return false;
@@ -4238,7 +4265,7 @@ static bool cs_condition(struct cs_request_info *r,
 				}
 				r->domain_attrs_candidates_ext[count - CS_MAX_DOMAIN_ATTRS_STATIC] = right.name;
 			}
-			r->domain_attr_count++;
+			r->domain_attrs_count++;
 			continue;
 		}
 		return false;
@@ -4578,5 +4605,5 @@ void cs_clear_request_info(struct cs_request_info *r)
 	r->domain_attrs = NULL;
 	kfree(r->domain_attrs_candidates_ext);
 	r->domain_attrs_candidates_ext = NULL;
-	r->domain_attr_count = 0;
+	r->domain_attrs_count = 0;
 }

@@ -662,9 +662,6 @@ struct cs_acl_info {
 	u8 audit;
 };
 
-
-extern struct list_head cs_domain_attrs_list;
-
 /* Structure for "string_group"/"number_group"/"ip_group" directive. */
 struct cs_group {
 	struct cs_shared_acl_head head;
@@ -815,7 +812,7 @@ struct cs_request_info {
 
 	const struct cs_path_info *domain_attrs_candidates[CS_MAX_DOMAIN_ATTRS_STATIC];
 	const struct cs_path_info **domain_attrs_candidates_ext;
-	u8 domain_attr_count;
+	u8 domain_attrs_count;
 	struct cs_domain_attrs *domain_attrs;
 
 
@@ -854,7 +851,8 @@ struct cs_domain_attrs {
 	struct list_head list;
 	struct kref ref;
 	u8 len;
-	const struct cs_path_info *names[];	
+	u8 names_hash;
+	const struct cs_path_info *names[];
 };
 
 
@@ -941,6 +939,7 @@ bool cs_dump_page(struct linux_binprm *bprm, unsigned long pos,
 bool cs_get_exename(struct cs_path_info *buf);
 bool cs_manager(void);
 bool cs_transit_domain(const char *domainname);
+void cs_transit_domain_attrs(struct cs_domain_attrs *a);
 char *cs_encode(const char *str);
 char *cs_encode2(const char *str, int str_len);
 char *cs_realpath(const struct path *path);
@@ -956,7 +955,7 @@ void cs_transition_failed(const char *domainname);
 void cs_warn_oom(const char *function);
 
 //XXX
-void cs_clear_request_info(struct cs_request_info *r);
+void cs_clear_request_info(struct cs_request_info *r); // Nedded?
 bool cs_memory_ok(const void *ptr);
 
 void cs_release_domain_attrs(struct kref *ptr);
@@ -971,6 +970,11 @@ extern struct list_head cs_condition_list;
 extern struct list_head cs_domain_list;
 extern struct list_head cs_group_list[CS_MAX_GROUP];
 extern struct list_head cs_name_list[CS_MAX_HASH];
+
+extern struct list_head cs_domain_attrs_list[CS_MAX_HASH];
+extern spinlock_t cs_domain_attrs_lock[CS_MAX_HASH]; 
+// TODO: cs_policy_lock -> cs_lock_global?
+
 extern struct mutex cs_policy_lock;
 extern struct srcu_struct cs_ss;
 extern unsigned int cs_memory_used[CS_MAX_MEMORY_STAT];
@@ -1103,13 +1107,18 @@ static inline void cs_put_name(const struct cs_path_info *name)
 		atomic_dec(&container_of(name, struct cs_name, entry)->
 			   head.users);
 }
-  
+
+static inline spinlock_t *cs_get_domain_attrs_lock(const u8 names_hash)
+{
+	return &cs_domain_attrs_lock[names_hash];
+}
+
 /**
  * cs_put_domain_attrs - Drop a reference on "struct cs_domain_attrs".
  *
  * @a: Pointer to "struct cs_domain_attrs". Maybe NULL.
  *
- * Must not run under cs_policy_lock - "cs_release_domain_attrs" is locking.
+ * Atomic-safe, since "cs_release_domain_attrs" is.
  *
  * Returns nothing.
  */

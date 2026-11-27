@@ -15,6 +15,7 @@
 #endif
 #include <linux/types.h>
 #include <linux/kernel.h>
+#include <linux/build_bug.h>
 #include <linux/string.h>
 #include <linux/mm.h>
 #include <linux/utime.h>

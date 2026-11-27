@@ -470,6 +470,7 @@ static void __init cs_load_builtin_policy(void);
 static void __init cs_policy_io_init(void);
 static void __init cs_securityfs_init(void);
 static void cs_check_profile(void);
+static inline bool cs_check_profile_feat_mac(enum cs_mac_index type);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 8, 0)
 static void cs_convert_time(time_t time, struct cs_time *stamp);
 #else
@@ -764,8 +765,17 @@ bool cs_policy_loaded;
 
 /* List of "struct cs_group". */
 struct list_head cs_group_list[CS_MAX_GROUP];
-/* Policy version. Currently only 20120401 is defined. */
+/* Loaded policy version. */
 static unsigned int cs_policy_version;
+
+/* Available policy versions */
+enum cs_policy_versions {
+	CS_POLICY_VERSION_FEAT_BASIC = 1,
+};
+#define CS_POLICY_VERSION_MIN CS_POLICY_VERSION_FEAT_BASIC
+#define CS_POLICY_VERSION_MAX CS_POLICY_VERSION_FEAT_BASIC
+
+static_assert(CS_POLICY_VERSION_MIN <= CS_POLICY_VERSION_MAX);
 
 /* List of "struct cs_condition". */
 LIST_HEAD(cs_condition_list);
@@ -2068,8 +2078,9 @@ static void cs_check_profile(void)
 {
 	cs_policy_loaded = true;
 	printk(KERN_INFO "CaitSith: 0.2.16   2026/09/28\n");
-	if (cs_policy_version == 20120401) {
-		printk(KERN_INFO "CaitSith module activated.\n");
+	if (cs_policy_version >= CS_POLICY_VERSION_MIN && cs_policy_version <= CS_POLICY_VERSION_MAX) {
+		printk(KERN_INFO "CaitSith module activated, policy version: %u\n",
+				cs_policy_version);
 		return;
 	}
 	printk(KERN_ERR "Policy version %u is not supported.\n",
@@ -2077,6 +2088,29 @@ static void cs_check_profile(void)
 	printk(KERN_ERR "Userland tools for CaitSith must be installed and policy must be initialized.\n");
 	printk(KERN_ERR "Please see https://caitsith.sourceforge.net/ for more information.\n");
 	panic("STOP!");
+}
+
+#define CS_CHECK_PROFILE_FEAT(t) (cs_policy_version >= (t))
+
+/**
+ * cs_check_profile_feat_mac - Check MAC op availability in loaded policy version.
+ *
+ * @type: One of values in "enum cs_mac_index" 
+ *
+ * Returns true is available, false otherwise.
+ */
+static inline bool cs_check_profile_feat_mac(enum cs_mac_index type)
+{
+	/* Skip check if there's only one supported policy version */ 
+	if (CS_POLICY_VERSION_MIN == CS_POLICY_VERSION_MAX)
+		return true;
+
+	switch (type) {
+	case CS_MAC_MAP:
+		return CS_CHECK_PROFILE_FEAT(CS_POLICY_VERSION_FEAT_MAC_MAP);
+	default:
+		return true;
+	}
 }
 
 /**
@@ -2241,6 +2275,9 @@ static int cs_parse_entry(struct cs_io_buffer *head)
 	for (type = 0; type < CS_MAX_MAC_INDEX; type++) {
 		if (strcmp(operation, cs_mac_keywords[type]))
 			continue;
+		if (!cs_check_profile_feat_mac(type))
+			return -EINVAL;
+		
 		head->w.acl_index = type;
 		/*
 		 * This is_deny is for rejecting handler= and transition=
